@@ -1,7 +1,8 @@
 #include "pipelined.hpp"
 
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/this_coro.hpp>
 
 #include <iostream>

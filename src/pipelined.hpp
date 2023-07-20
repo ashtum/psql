@@ -111,6 +111,14 @@ class pipelined
         return std::move(receiver);
     }
 
+    void send_flush()
+    {
+        if (!PQsendFlushRequest(conn_.get()))
+            throw make_error("PQsendFlushRequest failed");
+
+        write_cv_.cancel_one();
+    }
+
     void send_sync()
     {
         if (!PQpipelineSync(conn_.get()))
@@ -145,6 +153,9 @@ class pipelined
 
                     if (!res)
                     {
+                        if (PQisBusy(conn_.get()))
+                            break;
+
                         res.reset(PQgetResult(conn_.get()));
                         if (!res)
                             break;
