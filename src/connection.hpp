@@ -1,181 +1,334 @@
 #pragma once
 
+#include "error.hpp"
+
 #include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/deferred.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/experimental/co_composed.hpp>
+#include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/generic/stream_protocol.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/this_coro.hpp>
+
+#include <oneshot.hpp>
 
 #include <libpq-fe.h>
 
+#include <queue>
+
 namespace asiofiedpq
 {
-namespace net = boost::asio;
+namespace asio = boost::asio;
 
-struct PGresultDeleter
+struct pgresult_deleter
 {
-    void operator()(PGresult* p)
-    {
-        PQclear(p);
-    }
+  void operator()(PGresult* p)
+  {
+    PQclear(p);
+  }
 };
-using result = std::unique_ptr<PGresult, PGresultDeleter>;
+
+using result = std::unique_ptr<PGresult, pgresult_deleter>;
 
 struct query
 {
-    const char* command;
+  const char* command;
 
-    query(const char* command)
-        : command{ command }
-    {
-    }
+  query(const char* command)
+    : command{ command }
+  {
+  }
 };
 
 struct pipelined_query
 {
-    const char* command;
-    asiofiedpq::result result;
+  const char* command;
+  asiofiedpq::result result;
 
-    pipelined_query(const char* command)
-        : command{ command }
-    {
-    }
+  pipelined_query(const char* command)
+    : command{ command }
+  {
+  }
 };
 
 class connection
 {
-    struct PGconnDeleter
+  struct result_handler
+  {
+    virtual bool operator()(result) = 0;
+    virtual ~result_handler()       = default;
+  };
+
+  struct pgconn_deleter
+  {
+    void operator()(PGconn* p)
     {
-        void operator()(PGconn* p)
-        {
-            PQfinish(p);
-        }
-    };
-
-    using stream_protocol = net::generic::stream_protocol;
-    using wait_type       = stream_protocol::socket::wait_type;
-
-    std::unique_ptr<PGconn, PGconnDeleter> conn_;
-    stream_protocol::socket socket_;
-
-  public:
-    connection(net::any_io_executor exec)
-        : socket_{ exec }
-    {
+      PQfinish(p);
     }
+  };
 
-    ~connection()
-    {
-        // PQfinish handles the closing of the socket.
-        socket_.release();
-    }
+  using stream_protocol = asio::generic::stream_protocol;
+  using wait_type       = stream_protocol::socket::wait_type;
+  using error_code      = boost::system::error_code;
 
-    net::awaitable<void> async_connect(std::string connection_info)
-    {
-        conn_.reset(PQconnectStart(connection_info.data()));
+  static constexpr auto deferred_tuple{ asio::as_tuple(asio::deferred) };
 
-        if (PQstatus(conn_.get()) == CONNECTION_BAD)
-            throw make_error("PQconnectStart failed");
+  std::unique_ptr<PGconn, pgconn_deleter> conn_;
+  stream_protocol::socket socket_;
+  asio::steady_timer write_cv_;
+  std::queue<std::unique_ptr<result_handler>> result_handlers_;
 
-        if (PQsetnonblocking(conn_.get(), 1))
-            throw make_error("PQsetnonblocking failed");
+public:
+  connection(asio::any_io_executor exec)
+    : socket_{ exec }
+    , write_cv_{ exec, asio::steady_timer::time_point::max() }
+  {
+  }
 
-        PQsetNoticeProcessor(
-            conn_.get(), +[](void*, const char*) {}, nullptr);
+  ~connection()
+  {
+    // PQfinish handles the closing of the socket.
+    if (conn_)
+      socket_.release();
+  }
 
-        socket_.assign(net::ip::tcp::v4(), PQsocket(conn_.get()));
-
-        for (;;)
+  auto async_connect(std::string conninfo, asio::completion_token_for<void(error_code)> auto&& token)
+  {
+    return asio::async_initiate<decltype(token), void(error_code)>(
+      asio::experimental::co_composed<void(error_code)>(
+        [](auto state, auto* self, std::string conninfo) -> void
         {
-            auto ret = PQconnectPoll(conn_.get());
+          state.on_cancellation_complete_with(asio::error::operation_aborted);
+
+          self->conn_.reset(PQconnectStart(conninfo.data()));
+          self->socket_.assign(asio::ip::tcp::v4(), PQsocket(self->conn_.get()));
+
+          if (PQstatus(self->conn_.get()) == CONNECTION_BAD)
+            co_return { error::pqstatus_failed };
+
+          if (PQsetnonblocking(self->conn_.get(), 1))
+            co_return { error::pqsetnonblocking_failed };
+
+          PQsetNoticeProcessor(self->conn_.get(), nullptr, nullptr);
+
+          for (;;)
+          {
+            auto ret = PQconnectPoll(self->conn_.get());
 
             if (ret == PGRES_POLLING_READING)
-                co_await socket_.async_wait(wait_type::wait_read, net::deferred);
+              if (auto [ec] = co_await self->socket_.async_wait(wait_type::wait_read, deferred_tuple); ec)
+                co_return ec;
 
             if (ret == PGRES_POLLING_WRITING)
-                co_await socket_.async_wait(wait_type::wait_write, net::deferred);
+              if (auto [ec] = co_await self->socket_.async_wait(wait_type::wait_write, deferred_tuple); ec)
+                co_return ec;
 
             if (ret == PGRES_POLLING_FAILED)
-                throw make_error("PQconnectPoll failed");
+              co_return { error::connection_failed };
 
             if (ret == PGRES_POLLING_OK)
-                break;
-        }
-    }
+              break;
+          }
 
-    net::awaitable<void> async_exec_pipeline(const auto first, const auto last)
-    {
-        if (!PQenterPipelineMode(conn_.get()))
-            throw make_error("PQenterPipelineMode failed");
+          if (!PQenterPipelineMode(self->conn_.get()))
+            co_return { error::pqenterpipelinemode_failed };
 
-        for (auto it{ first }; it != last; it++)
-            if (!PQsendQueryParams(conn_.get(), it->command, 0, nullptr, nullptr, nullptr, nullptr, 0))
-                throw make_error("PQsendQueryParams failed");
+          co_return {};
+        },
+        socket_),
+      token,
+      this,
+      std::move(conninfo));
+  }
 
-        if (!PQpipelineSync(conn_.get()))
-            throw make_error("PQpipelineSync failed");
-
-        while (PQflush(conn_.get()))
-            co_await socket_.async_wait(wait_type::wait_write, net::deferred);
-
-        for (auto it{ first }; it != last; it++)
+  auto async_exec_pipeline(auto first, auto last, asio::completion_token_for<void(error_code)> auto&& token)
+  {
+    return asio::async_initiate<decltype(token), void(error_code)>(
+      asio::experimental::co_composed<void(error_code)>(
+        [](auto state, auto* self, auto first, auto last) -> void
         {
-            while (PQisBusy(conn_.get()))
-            {
-                co_await socket_.async_wait(wait_type::wait_read, net::deferred);
+          state.on_cancellation_complete_with(asio::error::operation_aborted);
 
-                if (!PQconsumeInput(conn_.get()))
-                    throw make_error("PQconsumeInput failed");
+          for (auto it = first; it != last; it++)
+            if (!PQsendQueryParams(self->conn_.get(), it->command, 0, nullptr, nullptr, nullptr, nullptr, 0))
+              co_return error::pqsendqueryparams_failed;
+
+          if (!PQpipelineSync(self->conn_.get()))
+            co_return error::pqpipelinesync_failed;
+
+          self->write_cv_.cancel_one();
+
+          auto [sender, receiver] = oneshot::create<void>();
+
+          struct pipeline_result_handler : result_handler
+          {
+            decltype(first) first_;
+            decltype(last) last_;
+            oneshot::sender<void> sender_;
+
+            pipeline_result_handler(decltype(first) first, decltype(last) last, oneshot::sender<void> sender)
+              : first_{ first }
+              , last_{ last }
+              , sender_{ std::move(sender) }
+            {
             }
 
-            it->result.reset(PQgetResult(conn_.get()));
-            PQgetResult(conn_.get());
-        }
+            bool operator()(result result) override
+            {
+              first_->result = std::move(result);
 
-        while (PQisBusy(conn_.get()))
+              if (++first_ == last_)
+              {
+                sender_.send();
+                return true;
+              }
+
+              return false;
+            }
+          };
+
+          self->result_handlers_.push(std::make_unique<pipeline_result_handler>(first, last, std::move(sender)));
+
+          if (auto [ec] = co_await receiver.async_wait(deferred_tuple); ec)
+          {
+            if (!!state.cancelled())
+              co_return ec;
+
+            co_return error::connection_failed;
+          }
+
+          co_return {};
+        },
+        socket_),
+      token,
+      this,
+      first,
+      last);
+  }
+
+  auto async_query(query query, asio::completion_token_for<void(error_code, result)> auto&& token)
+  {
+    return asio::async_initiate<decltype(token), void(error_code, result)>(
+      asio::experimental::co_composed<void(error_code, result)>(
+        [](auto state, auto* self, struct query query) -> void
         {
-            co_await socket_.async_wait(wait_type::wait_read, net::deferred);
+          state.on_cancellation_complete_with(asio::error::operation_aborted, {});
 
-            if (!PQconsumeInput(conn_.get()))
-                throw make_error("PQconsumeInput failed");
-        }
-        while (PQgetResult(conn_.get()))
-            ;
+          if (!PQsendQueryParams(self->conn_.get(), query.command, 0, nullptr, nullptr, nullptr, nullptr, 0))
+            co_return { error::pqsendqueryparams_failed, result{} };
 
-        if (!PQexitPipelineMode(conn_.get()))
-            throw make_error("PQexitPipelineMode failed");
-    }
+          if (!PQpipelineSync(self->conn_.get()))
+            co_return { error::pqpipelinesync_failed, result{} };
 
-    net::awaitable<result> async_query(query query)
+          self->write_cv_.cancel_one();
+
+          auto [sender, receiver] = oneshot::create<result>();
+
+          struct single_query_result_handler : result_handler
+          {
+            oneshot::sender<result> sender_;
+
+            single_query_result_handler(oneshot::sender<result> sender)
+              : sender_{ std::move(sender) }
+            {
+            }
+
+            bool operator()(result result) override
+            {
+              sender_.send(std::move(result));
+              return true;
+            }
+          };
+
+          self->result_handlers_.push(std::make_unique<single_query_result_handler>(std::move(sender)));
+
+          if (auto [ec] = co_await receiver.async_wait(deferred_tuple); ec)
+          {
+            if (!!state.cancelled())
+              co_return { ec, result{} };
+
+            co_return { error::connection_failed, result{} };
+          }
+
+          co_return { error_code{}, std::move(receiver.get()) };
+        },
+        socket_),
+      token,
+      this,
+      std::move(query));
+  }
+
+  asio::awaitable<void> async_run()
+  {
+    auto writer = [&]() -> asio::awaitable<void>
     {
-
-        if (!PQsendQueryParams(conn_.get(), query.command, 0, nullptr, nullptr, nullptr, nullptr, 0))
-            throw make_error("PQsendQueryParams failed");
+      const auto cs = co_await asio::this_coro::cancellation_state;
+      for (;;)
+      {
+        auto [ec] = co_await write_cv_.async_wait(asio::as_tuple(asio::deferred));
+        if (ec != asio::error::operation_aborted || !!cs.cancelled())
+          co_return;
 
         while (PQflush(conn_.get()))
-            co_await socket_.async_wait(wait_type::wait_write, net::deferred);
+          co_await socket_.async_wait(wait_type::wait_write, asio::deferred);
+      }
+    };
 
-        while (PQisBusy(conn_.get()))
+    auto reader = [&]() -> asio::awaitable<void>
+    {
+      for (;;)
+      {
+        while (!PQisBusy(conn_.get()))
         {
-            co_await socket_.async_wait(wait_type::wait_read, net::deferred);
+          auto result = std::unique_ptr<PGresult, pgresult_deleter>{ PQgetResult(conn_.get()) };
 
-            if (!PQconsumeInput(conn_.get()))
-                throw make_error("PQconsumeInput failed");
+          if (!result)
+          {
+            if (PQisBusy(conn_.get()))
+              break;
+
+            result.reset(PQgetResult(conn_.get()));
+            if (!result)
+              break;
+          }
+
+          if (PQresultStatus(result.get()) == PGRES_PIPELINE_SYNC)
+            continue;
+
+          assert(!result_handlers_.empty());
+
+          if (result_handlers_.front()->operator()(std::move(result)))
+            result_handlers_.pop();
         }
 
-        auto* p = PQgetResult(conn_.get());
+        co_await socket_.async_wait(wait_type::wait_read, asio::deferred);
 
-        while (PQgetResult(conn_.get()))
-            ;
-
-        co_return p;
-    }
-
-  private:
-    std::runtime_error make_error(const char* msg)
-    {
-        return std::runtime_error{ std::string{ msg } + ", error:" + PQerrorMessage(conn_.get()) };
+        if (!PQconsumeInput(conn_.get()))
+          throw make_error("PQconsumeInput failed");
+      }
     };
+
+    co_await asio::experimental::make_parallel_group(
+      asio::co_spawn(socket_.get_executor(), writer(), asio::deferred),
+      asio::co_spawn(socket_.get_executor(), reader(), asio::deferred))
+      .async_wait(asio::experimental::wait_for_one(), asio::deferred);
+  }
+
+  std::string_view error_message() const
+  {
+    return PQerrorMessage(conn_.get());
+  }
+
+private:
+  std::runtime_error make_error(const char* msg)
+  {
+    return std::runtime_error{ std::string{ msg } + ", error:" + PQerrorMessage(conn_.get()) };
+  };
 };
 
 } // namespace asiofiedpq
