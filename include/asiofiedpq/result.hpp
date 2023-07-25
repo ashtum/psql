@@ -6,7 +6,7 @@
 
 namespace asiofiedpq
 {
-struct PGresultDeleter
+struct pgresult_deleter
 {
   void operator()(PGresult* p)
   {
@@ -14,5 +14,5 @@ struct PGresultDeleter
   }
 };
 
-using result = std::unique_ptr<PGresult, PGresultDeleter>;
+using result = std::unique_ptr<PGresult, pgresult_deleter>;
 } // namespace asiofiedpq

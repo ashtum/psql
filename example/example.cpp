@@ -12,10 +12,10 @@ asio::awaitable<void> phonebook_demo(asiofiedpq::connection& conn)
 {
   auto pipeline = std::vector<asiofiedpq::pipelined_query>{};
 
-  pipeline.push_back("DROP TABLE IF EXISTS phonebook;");
-  pipeline.push_back("CREATE TABLE phonebook(phone VARCHAR, name VARCHAR);");
-  pipeline.push_back("INSERT INTO phonebook VALUES ('+1 111 444 7777', 'Jake'),('+2 333 222 3333', 'Megan');");
-  pipeline.push_back("SELECT * FROM phonebook ORDER BY name;");
+  pipeline.emplace_back("DROP TABLE IF EXISTS phonebook;");
+  pipeline.emplace_back("CREATE TABLE phonebook(phone VARCHAR, name VARCHAR);");
+  pipeline.emplace_back("INSERT INTO phonebook VALUES ('+1 111 444 7777', 'Jake'),('+2 333 222 3333', 'Megan');");
+  pipeline.emplace_back("SELECT * FROM phonebook ORDER BY name;");
 
   co_await conn.async_exec_pipeline(pipeline.begin(), pipeline.end(), asio::deferred);
 
@@ -51,7 +51,7 @@ int main()
     asio::co_spawn(
       ioc,
       async_main(),
-      [](std::exception_ptr ep)
+      [](const std::exception_ptr& ep)
       {
         if (ep)
           std::rethrow_exception(ep);

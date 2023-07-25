@@ -51,7 +51,7 @@ class connection
     virtual ~result_handler()       = default;
   };
 
-  struct PGconnDeleter
+  struct pgconn_deleter
   {
     void operator()(PGconn* p)
     {
@@ -65,13 +65,13 @@ class connection
 
   static constexpr auto deferred_tuple{ asio::as_tuple(asio::deferred) };
 
-  std::unique_ptr<PGconn, PGconnDeleter> conn_;
+  std::unique_ptr<PGconn, pgconn_deleter> conn_;
   stream_protocol::socket socket_;
   asio::steady_timer write_cv_;
   std::queue<std::unique_ptr<result_handler>> result_handlers_;
 
 public:
-  connection(asio::any_io_executor exec)
+  explicit connection(asio::any_io_executor exec)
     : socket_{ exec }
     , write_cv_{ exec, asio::steady_timer::time_point::max() }
   {
@@ -88,7 +88,7 @@ public:
   {
     return asio::async_initiate<decltype(token), void(error_code)>(
       asio::experimental::co_composed<void(error_code)>(
-        [](auto state, auto* self, std::string conninfo) -> void
+        [](auto state, connection* self, std::string conninfo) -> void
         {
           state.on_cancellation_complete_with(asio::error::operation_aborted);
 
@@ -138,7 +138,7 @@ public:
   {
     return asio::async_initiate<decltype(token), void(error_code)>(
       asio::experimental::co_composed<void(error_code)>(
-        [](auto state, auto* self, auto first, auto last) -> void
+        [](auto state, connection* self, auto first, auto last) -> void
         {
           state.on_cancellation_complete_with(asio::error::operation_aborted);
 
@@ -153,7 +153,7 @@ public:
 
           auto [sender, receiver] = oneshot::create<void>();
 
-          // TODO Mark result_handler on cancelation
+          // TODO Change result_handler state on cancellation
           struct pipeline_result_handler : result_handler
           {
             decltype(first) first_;
@@ -204,7 +204,7 @@ public:
   {
     return asio::async_initiate<decltype(token), void(error_code, result)>(
       asio::experimental::co_composed<void(error_code, result)>(
-        [](auto state, auto* self, struct query query) -> void
+        [](auto state, connection* self, struct query query) -> void
         {
           state.on_cancellation_complete_with(asio::error::operation_aborted, nullptr);
 
@@ -218,12 +218,12 @@ public:
 
           auto [sender, receiver] = oneshot::create<result>();
 
-          // TODO Mark result_handler on cancelation
+          // TODO Change result_handler state on cancellation
           struct single_query_result_handler : result_handler
           {
             oneshot::sender<result> sender_;
 
-            single_query_result_handler(oneshot::sender<result> sender)
+            explicit single_query_result_handler(oneshot::sender<result> sender)
               : sender_{ std::move(sender) }
             {
             }
@@ -257,7 +257,7 @@ public:
   {
     return asio::async_initiate<decltype(token), void(error_code)>(
       asio::experimental::co_composed<void(error_code)>(
-        [](auto state, auto* self) -> void
+        [](auto state, connection* self) -> void
         {
           state.on_cancellation_complete_with(asio::error::operation_aborted);
 
@@ -265,7 +265,7 @@ public:
           {
             return asio::async_initiate<decltype(token), void(error_code)>(
               asio::experimental::co_composed<void(error_code)>(
-                [](auto state, auto* self) -> void
+                [](auto state, connection* self) -> void
                 {
                   state.on_cancellation_complete_with(asio::error::operation_aborted);
 
@@ -291,7 +291,7 @@ public:
           {
             return asio::async_initiate<decltype(token), void(error_code)>(
               asio::experimental::co_composed<void(error_code)>(
-                [](auto state, auto* self) -> void
+                [](auto state, connection* self) -> void
                 {
                   state.on_cancellation_complete_with(asio::error::operation_aborted);
 
@@ -334,10 +334,8 @@ public:
               self);
           };
 
-          auto [_, ec1, ec2] =
-            co_await asio::experimental::make_parallel_group(
-              [writer](auto token) { return writer(token); }, [reader](auto token) { return reader(token); })
-              .async_wait(asio::experimental::wait_for_one(), deferred_tuple);
+          auto [_, ec1, ec2] = co_await asio::experimental::make_parallel_group(writer, reader)
+                                 .async_wait(asio::experimental::wait_for_one{}, deferred_tuple);
 
           // TODO Drain the result handlers
 

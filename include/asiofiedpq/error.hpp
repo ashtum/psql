@@ -66,6 +66,6 @@ namespace boost::system
 template<>
 struct is_error_code_enum<asiofiedpq::error>
 {
-  static bool const value = true;
+  static const bool value = true;
 };
 } // namespace boost::system
