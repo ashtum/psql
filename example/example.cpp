@@ -1,4 +1,4 @@
-#include "connection.hpp"
+#include <asiofiedpq/connection.hpp>
 
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/io_context.hpp>
@@ -39,14 +39,14 @@ asio::awaitable<void> async_main()
 
   co_await conn.async_connect("postgresql://postgres:postgres@172.18.0.2:5432", asio::deferred);
 
-  co_await (conn.async_run() || phonebook_demo(conn));
+  co_await (conn.async_run(asio::use_awaitable) || phonebook_demo(conn));
 }
 
 int main()
 {
   try
   {
-    asio::io_context ioc{};
+    auto ioc = asio::io_context{};
 
     asio::co_spawn(
       ioc,

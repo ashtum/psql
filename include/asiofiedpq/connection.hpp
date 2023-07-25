@@ -1,19 +1,16 @@
 #pragma once
 
 #include "error.hpp"
+#include "result.hpp"
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/as_tuple.hpp>
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/cancellation_state.hpp>
-#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/co_composed.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/generic/stream_protocol.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/this_coro.hpp>
 
 #include <oneshot.hpp>
 
@@ -24,16 +21,6 @@
 namespace asiofiedpq
 {
 namespace asio = boost::asio;
-
-struct pgresult_deleter
-{
-  void operator()(PGresult* p)
-  {
-    PQclear(p);
-  }
-};
-
-using result = std::unique_ptr<PGresult, pgresult_deleter>;
 
 struct query
 {
@@ -64,7 +51,7 @@ class connection
     virtual ~result_handler()       = default;
   };
 
-  struct pgconn_deleter
+  struct PGconnDeleter
   {
     void operator()(PGconn* p)
     {
@@ -78,7 +65,7 @@ class connection
 
   static constexpr auto deferred_tuple{ asio::as_tuple(asio::deferred) };
 
-  std::unique_ptr<PGconn, pgconn_deleter> conn_;
+  std::unique_ptr<PGconn, PGconnDeleter> conn_;
   stream_protocol::socket socket_;
   asio::steady_timer write_cv_;
   std::queue<std::unique_ptr<result_handler>> result_handlers_;
@@ -109,12 +96,13 @@ public:
           self->socket_.assign(asio::ip::tcp::v4(), PQsocket(self->conn_.get()));
 
           if (PQstatus(self->conn_.get()) == CONNECTION_BAD)
-            co_return { error::pqstatus_failed };
+            co_return error::pqstatus_failed;
 
           if (PQsetnonblocking(self->conn_.get(), 1))
-            co_return { error::pqsetnonblocking_failed };
+            co_return error::pqsetnonblocking_failed;
 
-          PQsetNoticeProcessor(self->conn_.get(), nullptr, nullptr);
+          PQsetNoticeProcessor(
+            self->conn_.get(), +[](void*, const char*) {}, nullptr);
 
           for (;;)
           {
@@ -129,14 +117,14 @@ public:
                 co_return ec;
 
             if (ret == PGRES_POLLING_FAILED)
-              co_return { error::connection_failed };
+              co_return error::connection_failed;
 
             if (ret == PGRES_POLLING_OK)
               break;
           }
 
           if (!PQenterPipelineMode(self->conn_.get()))
-            co_return { error::pqenterpipelinemode_failed };
+            co_return error::pqenterpipelinemode_failed;
 
           co_return {};
         },
@@ -165,6 +153,7 @@ public:
 
           auto [sender, receiver] = oneshot::create<void>();
 
+          // TODO Mark result_handler on cancelation
           struct pipeline_result_handler : result_handler
           {
             decltype(first) first_;
@@ -178,9 +167,9 @@ public:
             {
             }
 
-            bool operator()(result result) override
+            bool operator()(result res) override
             {
-              first_->result = std::move(result);
+              first_->result = std::move(res);
 
               if (++first_ == last_)
               {
@@ -217,18 +206,19 @@ public:
       asio::experimental::co_composed<void(error_code, result)>(
         [](auto state, auto* self, struct query query) -> void
         {
-          state.on_cancellation_complete_with(asio::error::operation_aborted, {});
+          state.on_cancellation_complete_with(asio::error::operation_aborted, nullptr);
 
           if (!PQsendQueryParams(self->conn_.get(), query.command, 0, nullptr, nullptr, nullptr, nullptr, 0))
-            co_return { error::pqsendqueryparams_failed, result{} };
+            co_return { error::pqsendqueryparams_failed, nullptr };
 
           if (!PQpipelineSync(self->conn_.get()))
-            co_return { error::pqpipelinesync_failed, result{} };
+            co_return { error::pqpipelinesync_failed, nullptr };
 
           self->write_cv_.cancel_one();
 
           auto [sender, receiver] = oneshot::create<result>();
 
+          // TODO Mark result_handler on cancelation
           struct single_query_result_handler : result_handler
           {
             oneshot::sender<result> sender_;
@@ -238,9 +228,9 @@ public:
             {
             }
 
-            bool operator()(result result) override
+            bool operator()(result res) override
             {
-              sender_.send(std::move(result));
+              sender_.send(std::move(res));
               return true;
             }
           };
@@ -250,9 +240,9 @@ public:
           if (auto [ec] = co_await receiver.async_wait(deferred_tuple); ec)
           {
             if (!!state.cancelled())
-              co_return { ec, result{} };
+              co_return { ec, nullptr };
 
-            co_return { error::connection_failed, result{} };
+            co_return { error::connection_failed, nullptr };
           }
 
           co_return { error_code{}, std::move(receiver.get()) };
@@ -263,72 +253,105 @@ public:
       std::move(query));
   }
 
-  asio::awaitable<void> async_run()
+  auto async_run(asio::completion_token_for<void(error_code)> auto&& token)
   {
-    auto writer = [&]() -> asio::awaitable<void>
-    {
-      const auto cs = co_await asio::this_coro::cancellation_state;
-      for (;;)
-      {
-        auto [ec] = co_await write_cv_.async_wait(asio::as_tuple(asio::deferred));
-        if (ec != asio::error::operation_aborted || !!cs.cancelled())
-          co_return;
-
-        while (PQflush(conn_.get()))
-          co_await socket_.async_wait(wait_type::wait_write, asio::deferred);
-      }
-    };
-
-    auto reader = [&]() -> asio::awaitable<void>
-    {
-      for (;;)
-      {
-        while (!PQisBusy(conn_.get()))
+    return asio::async_initiate<decltype(token), void(error_code)>(
+      asio::experimental::co_composed<void(error_code)>(
+        [](auto state, auto* self) -> void
         {
-          auto result = std::unique_ptr<PGresult, pgresult_deleter>{ PQgetResult(conn_.get()) };
+          state.on_cancellation_complete_with(asio::error::operation_aborted);
 
-          if (!result)
+          auto writer = [self](asio::completion_token_for<void(error_code)> auto&& token)
           {
-            if (PQisBusy(conn_.get()))
-              break;
+            return asio::async_initiate<decltype(token), void(error_code)>(
+              asio::experimental::co_composed<void(error_code)>(
+                [](auto state, auto* self) -> void
+                {
+                  state.on_cancellation_complete_with(asio::error::operation_aborted);
 
-            result.reset(PQgetResult(conn_.get()));
-            if (!result)
-              break;
-          }
+                  for (;;)
+                  {
+                    auto [ec] = co_await self->write_cv_.async_wait(asio::as_tuple(asio::deferred));
+                    if (ec != asio::error::operation_aborted || !!state.get_cancellation_state().cancelled())
+                      break;
 
-          if (PQresultStatus(result.get()) == PGRES_PIPELINE_SYNC)
-            continue;
+                    while (PQflush(self->conn_.get()))
+                      if (auto [ec] = co_await self->socket_.async_wait(wait_type::wait_write, deferred_tuple); ec)
+                        co_return ec;
+                  }
 
-          assert(!result_handlers_.empty());
+                  co_return {};
+                },
+                self->socket_),
+              token,
+              self);
+          };
 
-          if (result_handlers_.front()->operator()(std::move(result)))
-            result_handlers_.pop();
-        }
+          auto reader = [self](asio::completion_token_for<void(error_code)> auto&& token)
+          {
+            return asio::async_initiate<decltype(token), void(error_code)>(
+              asio::experimental::co_composed<void(error_code)>(
+                [](auto state, auto* self) -> void
+                {
+                  state.on_cancellation_complete_with(asio::error::operation_aborted);
 
-        co_await socket_.async_wait(wait_type::wait_read, asio::deferred);
+                  for (;;)
+                  {
+                    while (!PQisBusy(self->conn_.get()))
+                    {
+                      auto res = result{ PQgetResult(self->conn_.get()) };
 
-        if (!PQconsumeInput(conn_.get()))
-          throw make_error("PQconsumeInput failed");
-      }
-    };
+                      if (!res)
+                      {
+                        if (PQisBusy(self->conn_.get()))
+                          break;
 
-    co_await asio::experimental::make_parallel_group(
-      asio::co_spawn(socket_.get_executor(), writer(), asio::deferred),
-      asio::co_spawn(socket_.get_executor(), reader(), asio::deferred))
-      .async_wait(asio::experimental::wait_for_one(), asio::deferred);
+                        res.reset(PQgetResult(self->conn_.get()));
+                        if (!res) // successive nulls means we have read all the inputs
+                          break;
+                      }
+
+                      if (PQresultStatus(res.get()) == PGRES_PIPELINE_SYNC)
+                        continue;
+
+                      assert(!self->result_handlers_.empty());
+
+                      if (self->result_handlers_.front()->operator()(std::move(res)))
+                        self->result_handlers_.pop();
+                    }
+
+                    if (auto [ec] = co_await self->socket_.async_wait(wait_type::wait_read, deferred_tuple); ec)
+                      co_return ec;
+
+                    if (!PQconsumeInput(self->conn_.get()))
+                      co_return error::pqconsumeinput_failed;
+                  }
+
+                  co_return {};
+                },
+                self->socket_),
+              token,
+              self);
+          };
+
+          auto [_, ec1, ec2] =
+            co_await asio::experimental::make_parallel_group(
+              [writer](auto token) { return writer(token); }, [reader](auto token) { return reader(token); })
+              .async_wait(asio::experimental::wait_for_one(), deferred_tuple);
+
+          // TODO Drain the result handlers
+
+          co_return ec1 ? ec1 : ec2;
+        },
+        socket_),
+      token,
+      this);
   }
 
-  std::string_view error_message() const
+  std::string_view error_message() const noexcept
   {
     return PQerrorMessage(conn_.get());
   }
-
-private:
-  std::runtime_error make_error(const char* msg)
-  {
-    return std::runtime_error{ std::string{ msg } + ", error:" + PQerrorMessage(conn_.get()) };
-  };
 };
 
 } // namespace asiofiedpq

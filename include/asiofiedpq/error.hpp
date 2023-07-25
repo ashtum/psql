@@ -12,6 +12,7 @@ enum class error
   pqenterpipelinemode_failed,
   pqsendqueryparams_failed,
   pqpipelinesync_failed,
+  pqconsumeinput_failed
 };
 
 inline const boost::system::error_category& error_category()
@@ -41,6 +42,8 @@ inline const boost::system::error_category& error_category()
           return "PQsendQueryParams failed";
         case error::pqpipelinesync_failed:
           return "PQpipelineSync failed";
+        case error::pqconsumeinput_failed:
+          return "PQconsumeInput failed";
         default:
           return "Unknown error";
       }
