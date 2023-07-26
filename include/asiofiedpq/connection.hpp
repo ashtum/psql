@@ -1,9 +1,9 @@
 #pragma once
 
-#include "error.hpp"
-#include "result.hpp"
+#include <asiofiedpq/detail/result_handler.hpp>
+#include <asiofiedpq/error.hpp>
+#include <asiofiedpq/result.hpp>
 
-#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/detached.hpp>
@@ -11,8 +11,6 @@
 #include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/generic/stream_protocol.hpp>
 #include <boost/asio/ip/tcp.hpp>
-
-#include <libpq-fe.h>
 
 #include <queue>
 
@@ -43,53 +41,6 @@ struct pipelined_query
 
 class connection
 {
-  class result_handler
-  {
-  public:
-    enum status
-    {
-      waiting,
-      completed,
-      cancelled
-    };
-
-  private:
-    status status_{ status::waiting };
-    asio::steady_timer cv_;
-
-  public:
-    result_handler(asio::any_io_executor exec)
-      : cv_{ exec, asio::steady_timer::time_point::max() }
-    {
-    }
-
-    status get_status() const noexcept
-    {
-      return status_;
-    }
-
-    auto async_wait(asio::completion_token_for<void(boost::system::error_code)> auto&& token)
-    {
-      return cv_.async_wait(token);
-    }
-
-    virtual void handle(result) = 0;
-
-    void cancel()
-    {
-      status_ = cancelled;
-      cv_.cancel_one();
-    }
-
-    void complete()
-    {
-      status_ = completed;
-      cv_.cancel_one();
-    }
-
-    virtual ~result_handler() = default;
-  };
-
   struct pgconn_deleter
   {
     void operator()(PGconn* p)
@@ -107,7 +58,7 @@ class connection
   std::unique_ptr<PGconn, pgconn_deleter> conn_;
   stream_protocol::socket socket_;
   asio::steady_timer write_cv_;
-  std::queue<std::shared_ptr<result_handler>> result_handlers_;
+  std::queue<std::shared_ptr<detail::result_handler>> result_handlers_;
 
 public:
   explicit connection(asio::any_io_executor exec)
@@ -196,7 +147,7 @@ public:
 
           self->write_cv_.cancel_one();
 
-          class pipeline_result_handler : public result_handler
+          class pipeline_result_handler : public detail::result_handler
           {
             decltype(first) first_;
             decltype(last) last_;
@@ -238,13 +189,13 @@ public:
 
           co_await rh->async_wait(deferred_tuple);
 
-          if (rh->get_status() == result_handler::waiting)
+          if (rh->is_waiting())
           {
             rh->dumify();
             co_return asio::error::operation_aborted;
           }
 
-          if (rh->get_status() == result_handler::cancelled)
+          if (rh->is_cancelled())
             co_return error::connection_failed;
 
           co_return {};
@@ -272,7 +223,7 @@ public:
 
           self->write_cv_.cancel_one();
 
-          class single_query_result_handler : public result_handler
+          class single_query_result_handler : public detail::result_handler
           {
             result result_;
 
@@ -299,10 +250,10 @@ public:
 
           co_await rh->async_wait(deferred_tuple);
 
-          if (rh->get_status() == result_handler::waiting)
+          if (rh->is_waiting())
             co_return { asio::error::operation_aborted, nullptr };
 
-          if (rh->get_status() == result_handler::cancelled)
+          if (rh->is_cancelled())
             co_return { error::connection_failed, nullptr };
 
           co_return { error_code{}, rh->release_result() };
@@ -377,7 +328,7 @@ public:
                       auto& rh = self->result_handlers_.front();
                       rh->handle(std::move(res));
 
-                      if (rh->get_status() == result_handler::completed)
+                      if (rh->is_completed())
                         self->result_handlers_.pop();
                     }
 
