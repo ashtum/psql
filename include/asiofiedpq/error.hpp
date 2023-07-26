@@ -11,6 +11,10 @@ enum class error
   pqsetnonblocking_failed,
   pqenterpipelinemode_failed,
   pqsendqueryparams_failed,
+  pqsendprepare_failed,
+  pqsendqueryprepared_failed,
+  pqsenddescribeprepared_failed,
+  pqsenddescribeportal_failed,
   pqpipelinesync_failed,
   pqconsumeinput_failed
 };
@@ -40,6 +44,14 @@ inline const boost::system::error_category& error_category()
           return "PQenterPipelineMode failed";
         case error::pqsendqueryparams_failed:
           return "PQsendQueryParams failed";
+        case error::pqsendprepare_failed:
+          return "PQsendPrepare failed";
+        case error::pqsendqueryprepared_failed:
+          return "PQsendQueryPrepared failed";
+        case error::pqsenddescribeprepared_failed:
+          return "PQsendDescribePrepared failed";
+        case error::pqsenddescribeportal_failed:
+          return "PQsendDescribePortal failed";
         case error::pqpipelinesync_failed:
           return "PQpipelineSync failed";
         case error::pqconsumeinput_failed:

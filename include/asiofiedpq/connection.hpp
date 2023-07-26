@@ -6,7 +6,6 @@
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/deferred.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/co_composed.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/generic/stream_protocol.hpp>
@@ -209,59 +208,63 @@ public:
 
   auto async_query(query query, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return asio::async_initiate<decltype(token), void(error_code, result)>(
-      asio::experimental::co_composed<void(error_code, result)>(
-        [](auto state, connection* self, struct query query) -> void
-        {
-          state.on_cancellation_complete_with(asio::error::operation_aborted, nullptr);
+    return async_generic_single_result_query(
+      [this, query]() -> error_code
+      {
+        if (!PQsendQueryParams(conn_.get(), query.command, 0, nullptr, nullptr, nullptr, nullptr, 0))
+          return error::pqsendqueryparams_failed;
+        return {};
+      },
+      token);
+  }
 
-          if (!PQsendQueryParams(self->conn_.get(), query.command, 0, nullptr, nullptr, nullptr, nullptr, 0))
-            co_return { error::pqsendqueryparams_failed, nullptr };
+  auto
+  async_prepare(std::string stmt_name, query query, asio::completion_token_for<void(error_code, result)> auto&& token)
+  {
+    return async_generic_single_result_query(
+      [this, query, stmt_name]() -> error_code
+      {
+        if (!PQsendPrepare(conn_.get(), stmt_name.data(), query.command, 0, nullptr))
+          return error::pqsendprepare_failed;
+        return {};
+      },
+      token);
+  }
 
-          if (!PQpipelineSync(self->conn_.get()))
-            co_return { error::pqpipelinesync_failed, nullptr };
+  auto async_query_prepare(std::string stmt_name, asio::completion_token_for<void(error_code, result)> auto&& token)
+  {
+    return async_generic_single_result_query(
+      [this, stmt_name]() -> error_code
+      {
+        if (!PQsendQueryPrepared(conn_.get(), stmt_name.data(), 0, nullptr, nullptr, nullptr, 0))
+          return error::pqsendqueryprepared_failed;
+        return {};
+      },
+      token);
+  }
 
-          self->write_cv_.cancel_one();
+  auto async_describe_prepare(std::string stmt_name, asio::completion_token_for<void(error_code, result)> auto&& token)
+  {
+    return async_generic_single_result_query(
+      [this, stmt_name]() -> error_code
+      {
+        if (!PQsendDescribePrepared(conn_.get(), stmt_name.data()))
+          return error::pqsenddescribeprepared_failed;
+        return {};
+      },
+      token);
+  }
 
-          class single_query_result_handler : public detail::result_handler
-          {
-            result result_;
-
-          public:
-            explicit single_query_result_handler(asio::any_io_executor exec)
-              : result_handler{ std::move(exec) }
-            {
-            }
-
-            void handle(result res) override
-            {
-              result_ = std::move(res);
-              complete();
-            }
-
-            result release_result()
-            {
-              return std::move(result_);
-            }
-          };
-
-          auto rh = std::make_shared<single_query_result_handler>(state.get_io_executor());
-          self->result_handlers_.push(rh);
-
-          co_await rh->async_wait(deferred_tuple);
-
-          if (rh->is_waiting())
-            co_return { asio::error::operation_aborted, nullptr };
-
-          if (rh->is_cancelled())
-            co_return { error::connection_failed, nullptr };
-
-          co_return { error_code{}, rh->release_result() };
-        },
-        socket_),
-      token,
-      this,
-      std::move(query));
+  auto async_describe_portal(std::string portal_name, asio::completion_token_for<void(error_code, result)> auto&& token)
+  {
+    return async_generic_single_result_query(
+      [this, portal_name]() -> error_code
+      {
+        if (!PQsendDescribePortal(conn_.get(), portal_name.data()))
+          return error::pqsenddescribeportal_failed;
+        return {};
+      },
+      token);
   }
 
   auto async_run(asio::completion_token_for<void(error_code)> auto&& token)
@@ -347,6 +350,12 @@ public:
           auto [_, ec1, ec2] = co_await asio::experimental::make_parallel_group(writer, reader)
                                  .async_wait(asio::experimental::wait_for_one{}, deferred_tuple);
 
+          while (!self->result_handlers_.empty())
+          {
+            self->result_handlers_.front()->cancel();
+            self->result_handlers_.pop();
+          }
+
           co_return ec1 ? ec1 : ec2;
         },
         socket_),
@@ -358,6 +367,65 @@ public:
   {
     return PQerrorMessage(conn_.get());
   }
-};
 
+private:
+  auto async_generic_single_result_query(
+    auto query_fn,
+    asio::completion_token_for<void(error_code, result)> auto&& token)
+  {
+    return asio::async_initiate<decltype(token), void(error_code, result)>(
+      asio::experimental::co_composed<void(error_code, result)>(
+        [](auto state, connection* self, auto query_fn) -> void
+        {
+          state.on_cancellation_complete_with(asio::error::operation_aborted, nullptr);
+
+          if (auto ec = query_fn())
+            co_return { ec, nullptr };
+
+          if (!PQpipelineSync(self->conn_.get()))
+            co_return { error::pqpipelinesync_failed, nullptr };
+
+          self->write_cv_.cancel_one();
+
+          class single_query_result_handler : public detail::result_handler
+          {
+            result result_;
+
+          public:
+            explicit single_query_result_handler(asio::any_io_executor exec)
+              : result_handler{ std::move(exec) }
+            {
+            }
+
+            void handle(result res) override
+            {
+              result_ = std::move(res);
+              complete();
+            }
+
+            result release_result()
+            {
+              return std::move(result_);
+            }
+          };
+
+          auto rh = std::make_shared<single_query_result_handler>(state.get_io_executor());
+          self->result_handlers_.push(rh);
+
+          co_await rh->async_wait(deferred_tuple);
+
+          if (rh->is_waiting())
+            co_return { asio::error::operation_aborted, nullptr };
+
+          if (rh->is_cancelled())
+            co_return { error::connection_failed, nullptr };
+
+          co_return { error_code{}, rh->release_result() };
+        },
+        socket_),
+      token,
+      this,
+      std::move(query_fn));
+  }
+};
 } // namespace asiofiedpq

@@ -24,7 +24,7 @@ class result_handler
   asio::steady_timer cv_;
 
 public:
-  result_handler(asio::any_io_executor exec)
+  explicit result_handler(asio::any_io_executor exec)
     : cv_{ exec, asio::steady_timer::time_point::max() }
   {
   }
@@ -49,8 +49,6 @@ public:
     return cv_.async_wait(token);
   }
 
-  virtual void handle(result) = 0;
-
   void cancel()
   {
     status_ = status::cancelled;
@@ -62,6 +60,8 @@ public:
     status_ = status::completed;
     cv_.cancel_one();
   }
+
+  virtual void handle(result) = 0;
 
   virtual ~result_handler() = default;
 };
