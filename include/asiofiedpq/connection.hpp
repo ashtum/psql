@@ -45,10 +45,51 @@ struct pipelined_query
 
 class connection
 {
-  struct result_handler
+  class result_handler
   {
-    virtual bool operator()(result) = 0;
-    virtual ~result_handler()       = default;
+  public:
+    enum status
+    {
+      waiting,
+      completed,
+      cancelled
+    };
+
+  private:
+    status status_{ status::waiting };
+    asio::steady_timer cv_;
+
+  public:
+    result_handler(asio::any_io_executor exec)
+      : cv_{ exec, asio::steady_timer::time_point::max() }
+    {
+    }
+
+    status get_status() const noexcept
+    {
+      return status_;
+    }
+
+    auto async_wait(asio::completion_token_for<void(boost::system::error_code)> auto&& token)
+    {
+      return cv_.async_wait(token);
+    }
+
+    virtual void handle(result) = 0;
+
+    void cancel()
+    {
+      status_ = cancelled;
+      cv_.cancel_one();
+    }
+
+    void complete()
+    {
+      status_ = completed;
+      cv_.cancel_one();
+    }
+
+    virtual ~result_handler() = default;
   };
 
   struct pgconn_deleter
@@ -68,7 +109,7 @@ class connection
   std::unique_ptr<PGconn, pgconn_deleter> conn_;
   stream_protocol::socket socket_;
   asio::steady_timer write_cv_;
-  std::queue<std::unique_ptr<result_handler>> result_handlers_;
+  std::queue<std::shared_ptr<result_handler>> result_handlers_;
 
 public:
   explicit connection(asio::any_io_executor exec)
@@ -79,6 +120,12 @@ public:
 
   ~connection()
   {
+    while (!result_handlers_.empty())
+    {
+      result_handlers_.front()->cancel();
+      result_handlers_.pop();
+    }
+
     // PQfinish handles the closing of the socket.
     if (conn_)
       socket_.release();
@@ -151,45 +198,56 @@ public:
 
           self->write_cv_.cancel_one();
 
-          auto [sender, receiver] = oneshot::create<void>();
-
-          // TODO Change result_handler state on cancellation
-          struct pipeline_result_handler : result_handler
+          class pipeline_result_handler : public result_handler
           {
             decltype(first) first_;
             decltype(last) last_;
-            oneshot::sender<void> sender_;
+            size_t n_dummy_{ 0 };
 
-            pipeline_result_handler(decltype(first) first, decltype(last) last, oneshot::sender<void> sender)
-              : first_{ first }
+          public:
+            pipeline_result_handler(decltype(first) first, decltype(last) last, asio::any_io_executor exec)
+              : result_handler{ std::move(exec) }
+              , first_{ first }
               , last_{ last }
-              , sender_{ std::move(sender) }
             {
             }
 
-            bool operator()(result res) override
+            void handle(result res) override
             {
-              first_->result = std::move(res);
-
-              if (++first_ == last_)
+              if (n_dummy_)
               {
-                sender_.send();
-                return true;
+                if (--n_dummy_ == 0)
+                  this->complete();
               }
+              else
+              {
+                first_->result = std::move(res);
+                if (++first_ == last_)
+                  this->complete();
+              }
+            }
 
-              return false;
+            void dumify()
+            {
+              // on cancellation, it simply swallows the remaining results without touching the iterators (which have
+              // become invalid)
+              n_dummy_ = std::distance(first_, last_);
             }
           };
 
-          self->result_handlers_.push(std::make_unique<pipeline_result_handler>(first, last, std::move(sender)));
+          auto rh = std::make_shared<pipeline_result_handler>(first, last, state.get_io_executor());
+          self->result_handlers_.push(rh);
 
-          if (auto [ec] = co_await receiver.async_wait(deferred_tuple); ec)
+          co_await rh->async_wait(deferred_tuple);
+
+          if (rh->get_status() == result_handler::waiting)
           {
-            if (!!state.cancelled())
-              co_return ec;
-
-            co_return error::connection_failed;
+            rh->dumify();
+            co_return asio::error::operation_aborted;
           }
+
+          if (rh->get_status() == result_handler::cancelled)
+            co_return error::connection_failed;
 
           co_return {};
         },
@@ -216,36 +274,40 @@ public:
 
           self->write_cv_.cancel_one();
 
-          auto [sender, receiver] = oneshot::create<result>();
-
-          // TODO Change result_handler state on cancellation
-          struct single_query_result_handler : result_handler
+          class single_query_result_handler : public result_handler
           {
-            oneshot::sender<result> sender_;
+            result result_;
 
-            explicit single_query_result_handler(oneshot::sender<result> sender)
-              : sender_{ std::move(sender) }
+          public:
+            explicit single_query_result_handler(asio::any_io_executor exec)
+              : result_handler{ std::move(exec) }
             {
             }
 
-            bool operator()(result res) override
+            void handle(result res) override
             {
-              sender_.send(std::move(res));
-              return true;
+              result_ = std::move(res);
+              complete();
+            }
+
+            result release_result()
+            {
+              return std::move(result_);
             }
           };
 
-          self->result_handlers_.push(std::make_unique<single_query_result_handler>(std::move(sender)));
+          auto rh = std::make_shared<single_query_result_handler>(state.get_io_executor());
+          self->result_handlers_.push(rh);
 
-          if (auto [ec] = co_await receiver.async_wait(deferred_tuple); ec)
-          {
-            if (!!state.cancelled())
-              co_return { ec, nullptr };
+          co_await rh->async_wait(deferred_tuple);
 
+          if (rh->get_status() == result_handler::waiting)
+            co_return { asio::error::operation_aborted, nullptr };
+
+          if (rh->get_status() == result_handler::cancelled)
             co_return { error::connection_failed, nullptr };
-          }
 
-          co_return { error_code{}, std::move(receiver.get()) };
+          co_return { error_code{}, rh->release_result() };
         },
         socket_),
       token,
@@ -271,16 +333,14 @@ public:
 
                   for (;;)
                   {
-                    auto [ec] = co_await self->write_cv_.async_wait(asio::as_tuple(asio::deferred));
-                    if (ec != asio::error::operation_aborted || !!state.get_cancellation_state().cancelled())
-                      break;
+                    if (auto [ec] = co_await self->write_cv_.async_wait(deferred_tuple);
+                        ec != asio::error::operation_aborted)
+                      co_return ec;
 
                     while (PQflush(self->conn_.get()))
                       if (auto [ec] = co_await self->socket_.async_wait(wait_type::wait_write, deferred_tuple); ec)
                         co_return ec;
                   }
-
-                  co_return {};
                 },
                 self->socket_),
               token,
@@ -316,7 +376,10 @@ public:
 
                       assert(!self->result_handlers_.empty());
 
-                      if (self->result_handlers_.front()->operator()(std::move(res)))
+                      auto& rh = self->result_handlers_.front();
+                      rh->handle(std::move(res));
+
+                      if (rh->get_status() == result_handler::completed)
                         self->result_handlers_.pop();
                     }
 
@@ -326,8 +389,6 @@ public:
                     if (!PQconsumeInput(self->conn_.get()))
                       co_return error::pqconsumeinput_failed;
                   }
-
-                  co_return {};
                 },
                 self->socket_),
               token,
@@ -336,8 +397,6 @@ public:
 
           auto [_, ec1, ec2] = co_await asio::experimental::make_parallel_group(writer, reader)
                                  .async_wait(asio::experimental::wait_for_one{}, deferred_tuple);
-
-          // TODO Drain the result handlers
 
           co_return ec1 ? ec1 : ec2;
         },
