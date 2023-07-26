@@ -8,7 +8,6 @@ project(
 add_library(asiofiedpq INTERFACE)
 
 target_include_directories(asiofiedpq INTERFACE include)
-target_include_directories(asiofiedpq INTERFACE third_party)
   
 find_package(Boost 1.82 REQUIRED)
 find_package(PostgreSQL REQUIRED)

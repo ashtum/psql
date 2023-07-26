@@ -12,8 +12,6 @@
 #include <boost/asio/generic/stream_protocol.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
-#include <oneshot.hpp>
-
 #include <libpq-fe.h>
 
 #include <queue>
