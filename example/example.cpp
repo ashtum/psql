@@ -4,7 +4,6 @@
 #include <boost/asio/io_context.hpp>
 
 #include <iostream>
-#include <vector>
 
 namespace asio = boost::asio;
 
@@ -20,7 +19,7 @@ asio::awaitable<void> phonebook_demo(asiofiedpq::connection& conn)
 
   co_await conn.async_exec_pipeline(pipeline.begin(), pipeline.end(), asio::deferred);
 
-  PGresult* phonebook = pipeline.at(4).result.get();
+  PGresult* phonebook = pipeline.back().result.get();
   for (auto i = 0; i < PQntuples(phonebook); i++)
   {
     for (auto j = 0; j < PQnfields(phonebook); j++)

@@ -253,22 +253,32 @@ public:
       token);
   }
 
-  auto async_query_prepare(std::string stmt_name, asio::completion_token_for<void(error_code, result)> auto&& token)
+  auto async_query_prepared(
+    std::string stmt_name,
+    params params,
+    asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return async_generic_single_result_query(
-      [this, stmt_name]() -> error_code
+      [this, stmt_name = std::move(stmt_name), params = std::move(params)]() -> error_code
       {
-        if (!PQsendQueryPrepared(conn_.get(), stmt_name.data(), 0, nullptr, nullptr, nullptr, 0))
+        if (!PQsendQueryPrepared(
+              conn_.get(),
+              stmt_name.data(),
+              params.number_of_params(),
+              params.values(),
+              params.lengths(),
+              params.formats(),
+              0))
           return error::pqsendqueryprepared_failed;
         return {};
       },
       token);
   }
 
-  auto async_describe_prepare(std::string stmt_name, asio::completion_token_for<void(error_code, result)> auto&& token)
+  auto async_describe_prepared(std::string stmt_name, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return async_generic_single_result_query(
-      [this, stmt_name]() -> error_code
+      [this, stmt_name = std::move(stmt_name)]() -> error_code
       {
         if (!PQsendDescribePrepared(conn_.get(), stmt_name.data()))
           return error::pqsenddescribeprepared_failed;
@@ -280,7 +290,7 @@ public:
   auto async_describe_portal(std::string portal_name, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return async_generic_single_result_query(
-      [this, portal_name]() -> error_code
+      [this, portal_name = std::move(portal_name)]() -> error_code
       {
         if (!PQsendDescribePortal(conn_.get(), portal_name.data()))
           return error::pqsenddescribeportal_failed;
