@@ -2,6 +2,7 @@
 
 #include <asiofiedpq/detail/result_handler.hpp>
 #include <asiofiedpq/error.hpp>
+#include <asiofiedpq/params.hpp>
 #include <asiofiedpq/result.hpp>
 
 #include <boost/asio/as_tuple.hpp>
@@ -17,23 +18,20 @@ namespace asiofiedpq
 {
 namespace asio = boost::asio;
 
-struct query
+struct pipelined
 {
-  const char* command;
-
-  query(const char* command)
-    : command{ command }
-  {
-  }
-};
-
-struct pipelined_query
-{
-  const char* command;
+  std::string query;
+  asiofiedpq::params params;
   asiofiedpq::result result;
 
-  pipelined_query(const char* command)
-    : command{ command }
+  pipelined(const char* query)
+    : query{ query }
+  {
+  }
+
+  pipelined(const char* query, asiofiedpq::params params)
+    : query{ query }
+    , params{ std::move(params) }
   {
   }
 };
@@ -138,9 +136,18 @@ public:
           state.on_cancellation_complete_with(asio::error::operation_aborted);
 
           for (auto it = first; it != last; it++)
-            if (!PQsendQueryParams(self->conn_.get(), it->command, 0, nullptr, nullptr, nullptr, nullptr, 0))
+          {
+            if (!PQsendQueryParams(
+                  self->conn_.get(),
+                  it->query.data(),
+                  it->params.number_of_params(),
+                  it->params.types(),
+                  it->params.values(),
+                  it->params.lengths(),
+                  it->params.formats(),
+                  0))
               co_return error::pqsendqueryparams_failed;
-
+          }
           if (!PQpipelineSync(self->conn_.get()))
             co_return error::pqpipelinesync_failed;
 
@@ -206,25 +213,40 @@ public:
       last);
   }
 
-  auto async_query(query query, asio::completion_token_for<void(error_code, result)> auto&& token)
+  auto async_query(std::string query, asio::completion_token_for<void(error_code, result)> auto&& token)
+  {
+    return async_query(std::move(query), {}, std::move(token));
+  }
+
+  auto async_query(std::string query, params params, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return async_generic_single_result_query(
-      [this, query]() -> error_code
+      [this, query = std::move(query), params = std::move(params)]() -> error_code
       {
-        if (!PQsendQueryParams(conn_.get(), query.command, 0, nullptr, nullptr, nullptr, nullptr, 0))
+        if (!PQsendQueryParams(
+              conn_.get(),
+              query.data(),
+              params.number_of_params(),
+              params.types(),
+              params.values(),
+              params.lengths(),
+              params.formats(),
+              0))
           return error::pqsendqueryparams_failed;
         return {};
       },
       token);
   }
 
-  auto
-  async_prepare(std::string stmt_name, query query, asio::completion_token_for<void(error_code, result)> auto&& token)
+  auto async_prepare(
+    std::string stmt_name,
+    std::string query,
+    asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return async_generic_single_result_query(
-      [this, query, stmt_name]() -> error_code
+      [this, query = std::move(query), stmt_name]() -> error_code
       {
-        if (!PQsendPrepare(conn_.get(), stmt_name.data(), query.command, 0, nullptr))
+        if (!PQsendPrepare(conn_.get(), stmt_name.data(), query.data(), 0, nullptr))
           return error::pqsendprepare_failed;
         return {};
       },

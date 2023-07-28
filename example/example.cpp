@@ -10,22 +10,26 @@ namespace asio = boost::asio;
 
 asio::awaitable<void> phonebook_demo(asiofiedpq::connection& conn)
 {
-  auto pipeline = std::vector<asiofiedpq::pipelined_query>{};
+  auto pipeline = std::vector<asiofiedpq::pipelined>{};
 
-  pipeline.emplace_back("DROP TABLE IF EXISTS phonebook;");
-  pipeline.emplace_back("CREATE TABLE phonebook(phone VARCHAR, name VARCHAR);");
-  pipeline.emplace_back("INSERT INTO phonebook VALUES ('+1 111 444 7777', 'Jake'),('+2 333 222 3333', 'Megan');");
-  pipeline.emplace_back("SELECT * FROM phonebook ORDER BY name;");
+  pipeline.push_back({ "DROP TABLE IF EXISTS phonebook;" });
+  pipeline.push_back({ "CREATE TABLE phonebook(phone VARCHAR, name VARCHAR);" });
+  pipeline.push_back({ "INSERT INTO phonebook VALUES ($1, $2);", { "+1 111 444 7777", "Jake" } });
+  pipeline.push_back({ "INSERT INTO phonebook VALUES ($1, $2);", { "+2 333 222 3333", "Megan" } });
+  pipeline.push_back({ "SELECT * FROM phonebook ORDER BY name;" });
 
   co_await conn.async_exec_pipeline(pipeline.begin(), pipeline.end(), asio::deferred);
 
-  PGresult* phonebook = pipeline.at(3).result.get();
+  PGresult* phonebook = pipeline.at(4).result.get();
   for (auto i = 0; i < PQntuples(phonebook); i++)
   {
     for (auto j = 0; j < PQnfields(phonebook); j++)
       std::cout << PQfname(phonebook, j) << ":" << PQgetvalue(phonebook, i, j) << '\t';
     std::cout << std::endl;
   }
+
+  auto result = co_await conn.async_query("SELECT $1 + $2 + $3::INTEGER;", { 1.5, 1, true }, asio::deferred);
+  std::cout << "result:" << PQgetvalue(result.get(), 0, 0) << std::endl;
 
   auto timestamp = co_await conn.async_query("SELECT NOW()::timestamp(0);", asio::deferred);
   std::cout << PQgetvalue(timestamp.get(), 0, 0) << std::endl;
