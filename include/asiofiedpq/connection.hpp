@@ -24,13 +24,13 @@ struct pipelined
   asiofiedpq::params params;
   asiofiedpq::result result;
 
-  pipelined(const char* query)
-    : query{ query }
+  pipelined(std::string query)
+    : query{ std::move(query) }
   {
   }
 
-  pipelined(const char* query, asiofiedpq::params params)
-    : query{ query }
+  pipelined(std::string query, asiofiedpq::params params)
+    : query{ std::move(query) }
     , params{ std::move(params) }
   {
   }
@@ -140,7 +140,7 @@ public:
             if (!PQsendQueryParams(
                   self->conn_.get(),
                   it->query.data(),
-                  it->params.number_of_params(),
+                  it->params.count(),
                   it->params.types(),
                   it->params.values(),
                   it->params.lengths(),
@@ -226,7 +226,7 @@ public:
         if (!PQsendQueryParams(
               conn_.get(),
               query.data(),
-              params.number_of_params(),
+              params.count(),
               params.types(),
               params.values(),
               params.lengths(),
@@ -262,13 +262,7 @@ public:
       [this, stmt_name = std::move(stmt_name), params = std::move(params)]() -> error_code
       {
         if (!PQsendQueryPrepared(
-              conn_.get(),
-              stmt_name.data(),
-              params.number_of_params(),
-              params.values(),
-              params.lengths(),
-              params.formats(),
-              0))
+              conn_.get(), stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 0))
           return error::pqsendqueryprepared_failed;
         return {};
       },

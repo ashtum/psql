@@ -6,100 +6,142 @@
 
 #include <libpq-fe.h>
 
-#include <cstdint>
+#include <array>
+#include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace asiofiedpq
 {
+
 class params
 {
-  static constexpr auto BINARY_FORMAT = 1;
-
-  std::vector<char> buffer_;
-  std::vector<Oid> types_;
-  std::vector<const char*> values_;
-  std::vector<int> lengths_;
-  std::vector<int> formats_;
+  class interface
+  {
+  public:
+    virtual int count() const                 = 0;
+    virtual const Oid* types() const          = 0;
+    virtual const char* const* values() const = 0;
+    virtual const int* lengths() const        = 0;
+    virtual const int* formats() const        = 0;
+    virtual ~interface()                      = default;
+  };
+  std::unique_ptr<interface> impl_;
 
 public:
   params(auto&&... params)
     requires(!(std::is_same_v<asiofiedpq::params, std::decay_t<decltype(params)>> || ...))
+    : impl_{ std::make_unique<impl<sizeof...(params)>>(std::forward<decltype(params)>(params)...) }
   {
-    (add(std::forward<decltype(params)>(params)), ...);
-
-    // convert offsets to pointers
-    for (auto& offset : values_)
-      offset = std::next(buffer_.data(), reinterpret_cast<size_t>(offset));
   }
 
-  params(const params&)            = delete;
-  params& operator=(const params&) = delete;
-  params(params&&)                 = default;
-  params& operator=(params&&)      = default;
-
-  int number_of_params() const
+  int count() const
   {
-    return static_cast<int>(types_.size());
+    return impl_->count();
   }
 
   const Oid* types() const
   {
-    return std::addressof(types_.front());
+    return impl_->types();
   }
 
   const char* const* values() const
   {
-    return std::addressof(values_.front());
+    return impl_->values();
   }
 
   const int* lengths() const
   {
-    return std::addressof(lengths_.front());
+    return impl_->lengths();
   }
 
   const int* formats() const
   {
-    return std::addressof(formats_.front());
+    return impl_->formats();
     ;
   }
 
 private:
-  template<typename T>
-  void add(T param)
-    requires(std::is_integral_v<T> || std::is_floating_point_v<T>)
+  template<size_t N>
+  class impl : public interface
   {
-    store_current_offset();
-    boost::endian::endian_store<T, sizeof(T), boost::endian::order::big>(
-      reinterpret_cast<unsigned char*>(make_buffer(sizeof(T))), param);
-    types_.push_back(oid_map<T>::value);
-    lengths_.push_back(sizeof(T));
-    formats_.push_back(BINARY_FORMAT);
-  }
+    static constexpr auto BINARY_FORMAT = 1;
 
-  void add(std::string_view param)
-  {
-    buffer_.reserve(buffer_.size() + param.size());
-    store_current_offset();
-    buffer_.insert(
-      buffer_.end(),
-      reinterpret_cast<const unsigned char*>(param.begin()),
-      reinterpret_cast<const unsigned char*>(param.end()));
-    types_.push_back(25); // Oid of text
-    lengths_.push_back(param.size());
-    formats_.push_back(BINARY_FORMAT);
-  }
+    std::string buffer_;
+    std::array<Oid, N> types_;
+    std::array<const char*, N> values_;
+    std::array<int, N> lengths_;
+    std::array<int, N> formats_;
 
-  char* make_buffer(size_t size)
-  {
-    buffer_.resize(buffer_.size() + size);
-    return std::addressof(buffer_.back()) - size + 1;
-  }
+  public:
+    impl(auto&&... params)
+    {
+      [&]<size_t... Is>(std::index_sequence<Is...>)
+      { (add(Is, std::forward<decltype(params)>(params)), ...); }(std::index_sequence_for<decltype(params)...>());
 
-  void store_current_offset()
-  {
-    return values_.push_back(reinterpret_cast<const char*>(buffer_.size()));
-  }
+      // convert offsets to pointers
+      for (auto& offset : values_)
+        offset = std::next(buffer_.data(), reinterpret_cast<size_t>(offset));
+    }
+
+    int count() const override
+    {
+      return N;
+    }
+
+    const Oid* types() const override
+    {
+      return types_.data();
+    }
+
+    const char* const* values() const override
+    {
+      return values_.data();
+    }
+
+    const int* lengths() const override
+    {
+      return lengths_.data();
+    }
+
+    const int* formats() const override
+    {
+      return formats_.data();
+      ;
+    }
+
+  private:
+    template<typename Param>
+    void add(size_t i, Param param)
+      requires(std::is_integral_v<Param> || std::is_floating_point_v<Param>)
+    {
+      store_current_offset(i);
+      boost::endian::endian_store<Param, sizeof(Param), boost::endian::order::big>(
+        reinterpret_cast<unsigned char*>(make_buffer(sizeof(Param))), param);
+      types_[i]   = oid_map<Param>::value;
+      lengths_[i] = sizeof(Param);
+      formats_[i] = BINARY_FORMAT;
+    }
+
+    void add(size_t i, std::string_view param)
+    {
+      store_current_offset(i);
+      buffer_.append(param);
+      types_[i]   = 25; // Oid of text
+      lengths_[i] = param.size();
+      formats_[i] = BINARY_FORMAT;
+    }
+
+    char* make_buffer(size_t size)
+    {
+      buffer_.resize(buffer_.size() + size);
+      return std::addressof(buffer_.back()) - size + 1;
+    }
+
+    void store_current_offset(size_t i)
+    {
+      values_[i] = reinterpret_cast<const char*>(buffer_.size());
+    }
+  };
 };
 } // namespace asiofiedpq
