@@ -215,7 +215,7 @@ public:
 
   auto async_query(std::string query, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return async_query(std::move(query), {}, std::move(token));
+    return async_query(std::move(query), {}, token);
   }
 
   auto async_query(std::string query, params params, asio::completion_token_for<void(error_code, result)> auto&& token)
