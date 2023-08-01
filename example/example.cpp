@@ -27,11 +27,15 @@ asio::awaitable<void> phonebook_demo(asiofiedpq::connection& conn)
     std::cout << std::endl;
   }
 
-  auto result = co_await conn.async_query("SELECT $1 + $2 + $3::INTEGER;", { 1.5, 1, true }, asio::deferred);
-  std::cout << "result:" << PQgetvalue(result.get(), 0, 0) << std::endl;
+  auto print = [](auto res) { std::cout << PQfname(res.get(), 0) << ':' << PQgetvalue(res.get(), 0, 0) << std::endl; };
 
-  auto timestamp = co_await conn.async_query("SELECT NOW()::timestamp(0);", asio::deferred);
-  std::cout << PQgetvalue(timestamp.get(), 0, 0) << std::endl;
+  print(co_await conn.async_query("SELECT $1 as int_array;", std::vector{ 1, 2, 3 }, asio::deferred));
+
+  print(co_await conn.async_query("SELECT $1 as bool_array;", std::vector{ true, false, true }, asio::deferred));
+
+  print(co_await conn.async_query("SELECT $1 as timepoint;", std::chrono::system_clock::now(), asio::deferred));
+
+  print(co_await conn.async_query("SELECT NOW()::timestamp(0) as timestamp;", asio::deferred));
 }
 
 asio::awaitable<void> async_main()

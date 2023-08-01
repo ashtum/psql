@@ -8,8 +8,10 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace asiofiedpq
 {
@@ -66,7 +68,7 @@ private:
   template<size_t N>
   class impl : public interface
   {
-    static constexpr auto binary_format = 1;
+    using order = boost::endian::order;
 
     std::string buffer_;
     std::array<Oid, N> types_;
@@ -81,12 +83,14 @@ private:
       [&]<size_t... Is>(std::index_sequence<Is...>)
       { (add(Is, std::forward<Params>(params)), ...); }(std::index_sequence_for<Params...>());
 
-      // convert offsets to pointers
+      // Converts offsets to pointers
       for (size_t offset = 0, i = 0; i < N; i++)
       {
-        values_[i] = buffer_.data() + offset;
+        values_[i] = lengths_[i] ? buffer_.data() + offset : nullptr;
         offset += lengths_[i];
       }
+
+      formats_.fill(1); // All items are in binary format
     }
 
     impl(const impl&) = delete;
@@ -119,13 +123,51 @@ private:
 
   private:
     template<typename Param>
+    void add(size_t i, const std::vector<Param>& param)
+      requires(std::is_integral_v<Param> || std::is_floating_point_v<Param> || std::is_same_v<Param, std::byte>)
+    {
+      const auto init_size = buffer_.size();
+      boost::endian::endian_store<int32_t, 4, order::big>(make_buffer(4), 1);
+      boost::endian::endian_store<int32_t, 4, order::big>(make_buffer(4), 0);
+      boost::endian::endian_store<int32_t, 4, order::big>(make_buffer(4), oid_map<Param>::value);
+      boost::endian::endian_store<int32_t, 4, order::big>(make_buffer(4), std::size(param));
+      boost::endian::endian_store<int32_t, 4, order::big>(make_buffer(4), 0);
+
+      for (const auto& item : param)
+      {
+        boost::endian::endian_store<int32_t, 4, order::big>(make_buffer(4), sizeof(item));
+        boost::endian::endian_store<Param, sizeof(item), order::big>(make_buffer(sizeof(item)), item);
+      }
+
+      types_[i]   = oid_map<Param>::arr_value;
+      lengths_[i] = static_cast<int>(buffer_.size() - init_size);
+    }
+
+    template<typename Param>
     void add(size_t i, Param param)
       requires(std::is_integral_v<Param> || std::is_floating_point_v<Param>)
     {
-      boost::endian::endian_store<Param, sizeof(Param), boost::endian::order::big>(make_buffer(sizeof(Param)), param);
+      boost::endian::endian_store<Param, sizeof(Param), order::big>(make_buffer(sizeof(Param)), param);
       types_[i]   = oid_map<Param>::value;
       lengths_[i] = sizeof(Param);
-      formats_[i] = binary_format;
+    }
+
+    void add(size_t i, std::nullptr_t)
+    {
+      types_[i]   = 0; // Oid of NULL
+      lengths_[i] = 0;
+    }
+
+    template<typename Param>
+    void add(size_t i, const std::optional<Param>& opt)
+    {
+      opt ? add(i, *opt) : add(i, nullptr);
+    }
+
+    template<typename Param>
+    void add(size_t i, Param* param)
+    {
+      param ? add(i, *param) : add(i, nullptr);
     }
 
     void add(size_t i, std::string_view param)
@@ -133,7 +175,20 @@ private:
       buffer_.append(param);
       types_[i]   = 25; // Oid of text
       lengths_[i] = param.size();
-      formats_[i] = binary_format;
+    }
+
+    void add(size_t i, const char* param)
+    {
+      add(i, std::string_view{ param });
+    }
+
+    void add(size_t i, std::chrono::system_clock::time_point param)
+    {
+      auto pg_epoch = std::chrono::system_clock::time_point{} + std::chrono::seconds{ 946684800 };
+      int64_t value = std::chrono::duration_cast<std::chrono::microseconds>(param - pg_epoch).count();
+      boost::endian::endian_store<int64_t, sizeof(int64_t), order::big>(make_buffer(sizeof(int64_t)), value);
+      types_[i]   = oid_map<std::chrono::system_clock::time_point>::value;
+      lengths_[i] = sizeof(int64_t);
     }
 
     uint8_t* make_buffer(size_t size)
