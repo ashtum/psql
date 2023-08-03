@@ -46,7 +46,7 @@ public:
 
   auto async_wait(asio::completion_token_for<void(boost::system::error_code)> auto&& token)
   {
-    return cv_.async_wait(token);
+    return cv_.async_wait(std::forward<decltype(token)>(token));
   }
 
   void cancel()

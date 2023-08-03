@@ -184,8 +184,7 @@ public:
 
             void dumify()
             {
-              // on cancellation, it simply swallows the remaining results without touching the iterators (which have
-              // become invalid)
+              // Swallows the remaining results without touching the iterators (which have become invalid)
               n_dummy_ = std::distance(first_, last_);
             }
           };
@@ -215,7 +214,7 @@ public:
 
   auto async_query(std::string query, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return async_query(std::move(query), {}, token);
+    return async_query(std::move(query), {}, std::forward<decltype(token)>(token));
   }
 
   auto async_query(std::string query, params params, asio::completion_token_for<void(error_code, result)> auto&& token)
@@ -235,7 +234,7 @@ public:
           return error::pqsendqueryparams_failed;
         return {};
       },
-      token);
+      std::forward<decltype(token)>(token));
   }
 
   auto async_prepare(
@@ -250,7 +249,7 @@ public:
           return error::pqsendprepare_failed;
         return {};
       },
-      token);
+      std::forward<decltype(token)>(token));
   }
 
   auto async_query_prepared(
@@ -278,7 +277,7 @@ public:
           return error::pqsenddescribeprepared_failed;
         return {};
       },
-      token);
+      std::forward<decltype(token)>(token));
   }
 
   auto async_describe_portal(std::string portal_name, asio::completion_token_for<void(error_code, result)> auto&& token)
@@ -290,7 +289,7 @@ public:
           return error::pqsenddescribeportal_failed;
         return {};
       },
-      token);
+      std::forward<decltype(token)>(token));
   }
 
   auto async_run(asio::completion_token_for<void(error_code)> auto&& token)
