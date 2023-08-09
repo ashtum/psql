@@ -77,6 +77,11 @@ public:
       socket_.release();
   }
 
+  auto get_executor() noexcept
+  {
+    return socket_.get_executor();
+  }
+
   auto async_connect(std::string conninfo, asio::completion_token_for<void(error_code)> auto&& token)
   {
     return asio::async_initiate<decltype(token), void(error_code)>(

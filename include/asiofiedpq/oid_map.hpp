@@ -1,74 +1,83 @@
 #pragma once
 
-#include <chrono>
-#include <cstdint>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <typeindex>
+#include <vector>
 
 namespace asiofiedpq
 {
 template<typename>
-struct oid_map;
+struct user_defined;
 
-template<>
-struct oid_map<bool>
+class oid_map
 {
-  static constexpr auto value     = 16;
-  static constexpr auto arr_value = 1000;
-};
+  struct pg_type_info
+  {
+    std::string name;
+    int type_oid  = -1;
+    int array_oid = -1;
+  };
 
-template<>
-struct oid_map<std::byte>
-{
-  static constexpr auto value     = 17;
-  static constexpr auto arr_value = 1001;
-};
+  std::map<std::type_index, pg_type_info> types_;
 
-template<>
-struct oid_map<char>
-{
-  static constexpr auto value     = 18;
-  static constexpr auto arr_value = 1002;
-};
+public:
+  template<typename T>
+    requires requires(T) { user_defined<T>{}; }
+  void register_type(std::string name)
+  {
+    types_.emplace(typeid(T), pg_type_info{ std::move(name) });
+  }
 
-template<>
-struct oid_map<int64_t>
-{
-  static constexpr auto value     = 20;
-  static constexpr auto arr_value = 1016;
-};
+  void set_type_oids(std::string_view name, int type_oid, int array_oid)
+  {
+    auto& pg_type_info     = find_pg_type_info(name);
+    pg_type_info.type_oid  = type_oid;
+    pg_type_info.array_oid = array_oid;
+  }
 
-template<>
-struct oid_map<int16_t>
-{
-  static constexpr auto value     = 21;
-  static constexpr auto arr_value = 1005;
-};
+  std::vector<std::string_view> get_type_names() const
+  {
+    std::vector<std::string_view> result;
+    result.reserve(types_.size());
 
-template<>
-struct oid_map<int32_t>
-{
-  static constexpr auto value     = 23;
-  static constexpr auto arr_value = 1007;
-};
+    for (auto& [_, value] : types_)
+      result.push_back(value.name);
 
-template<>
-struct oid_map<float>
-{
-  static constexpr auto value     = 700;
-  static constexpr auto arr_value = 1021;
-};
+    return result;
+  }
 
-template<>
-struct oid_map<double>
-{
-  static constexpr auto value     = 701;
-  static constexpr auto arr_value = 1022;
-};
+  template<typename T>
+    requires requires(T) { user_defined<T>{}; }
+  int get_type_oid() const
+  {
+    return find_pg_type_info(typeid(T)).type_oid;
+  }
 
-template<>
-struct oid_map<std::chrono::system_clock::time_point>
-{
-  static constexpr auto value     = 1114;
-  static constexpr auto arr_value = 1115;
-};
+  template<typename T>
+    requires requires(T) { user_defined<T>{}; }
+  int get_array_oid() const
+  {
+    return find_pg_type_info(typeid(T)).array_oid;
+  }
 
+private:
+  const pg_type_info& find_pg_type_info(const std::type_index& type_index) const
+  {
+    if (auto it = types_.find(type_index); it != types_.end())
+      return it->second;
+
+    throw std::runtime_error{ "The specified type does not exist in the oid_map" };
+  }
+
+  pg_type_info& find_pg_type_info(std::string_view name)
+  {
+    for (auto& [_, value] : types_)
+      if (value.name == name)
+        return value;
+
+    throw std::runtime_error{ "The specified type does not exist in the oid_map" };
+  }
+};
 } // namespace asiofiedpq
