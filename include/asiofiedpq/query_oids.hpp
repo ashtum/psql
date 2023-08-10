@@ -19,13 +19,8 @@ auto async_query_oids(
           type_names,
           asio::as_tuple(asio::deferred));
 
-        for (auto i = 0; i < PQntuples(result.get()); i++)
-        {
-          omp->set_type_oids(
-            PQgetvalue(result.get(), i, 0),
-            std::stoi(PQgetvalue(result.get(), i, 1)),
-            std::stoi(PQgetvalue(result.get(), i, 2)));
-        }
+        for (auto row : result)
+          omp->set_type_oids(row.at(0).data(), std::stoi(row.at(1).data()), std::stoi(row.at(2).data()));
 
         co_return ec;
       },

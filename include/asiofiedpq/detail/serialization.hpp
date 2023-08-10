@@ -9,7 +9,6 @@ namespace asiofiedpq
 {
 namespace detail
 {
-
 template<class T>
 struct serialize_impl;
 
@@ -104,5 +103,5 @@ struct serialize_impl<T>
     }
   }
 };
-} // detail
-} // asiofiedpq
+} // namespace detail
+} // namespace asiofiedpq

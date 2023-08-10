@@ -102,5 +102,5 @@ struct builtin<std::tuple<Ts...>>
   static constexpr auto type_oid  = 2249;
   static constexpr auto array_oid = 2287;
 };
-} // detail
+} // namespace detail
 } // namespace asiofiedpq

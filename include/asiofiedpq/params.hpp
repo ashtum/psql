@@ -22,7 +22,7 @@ class params
     virtual ~interface()                      = default;
   };
   std::unique_ptr<interface> impl_;
-  static inline oid_map empty_omp_;
+  static const inline oid_map empty_omp;
 
 public:
   params() = default;
@@ -38,7 +38,7 @@ public:
   params(Ts&&... params)
     requires(
       !((std::is_same_v<oid_map, std::decay_t<Ts>> || std::is_same_v<asiofiedpq::params, std::decay_t<Ts>>) || ...))
-    : impl_{ std::make_unique<impl<sizeof...(Ts)>>(empty_omp_, std::forward<Ts>(params)...) }
+    : impl_{ std::make_unique<impl<sizeof...(Ts)>>(empty_omp, std::forward<Ts>(params)...) }
   {
   }
 

@@ -18,11 +18,11 @@ asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
 
   co_await conn.async_exec_pipeline(pipeline.begin(), pipeline.end(), asio::deferred);
 
-  PGresult* phonebook = pipeline.back().result.get();
-  for (auto i = 0; i < PQntuples(phonebook); i++)
+  for (auto row : pipeline.back().result)
   {
-    for (auto j = 0; j < PQnfields(phonebook); j++)
-      std::cout << PQfname(phonebook, j) << ":" << PQgetvalue(phonebook, i, j) << '\t';
+    for (auto value : row)
+      std::cout << value.name() << ":" << value.data() << '\t';
+
     std::cout << std::endl;
   }
 }

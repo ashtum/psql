@@ -248,7 +248,7 @@ public:
     asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return async_generic_single_result_query(
-      [this, query = std::move(query), stmt_name]() -> error_code
+      [this, query = std::move(query), stmt_name = std::move(stmt_name)]() -> error_code
       {
         if (!PQsendPrepare(conn_.get(), stmt_name.data(), query.data(), 0, nullptr))
           return error::pqsendprepare_failed;
@@ -348,12 +348,12 @@ public:
                         if (PQisBusy(self->conn_.get()))
                           break;
 
-                        res.reset(PQgetResult(self->conn_.get()));
+                        res = PQgetResult(self->conn_.get());
                         if (!res) // successive nulls means we have read all the inputs
                           break;
                       }
 
-                      if (PQresultStatus(res.get()) == PGRES_PIPELINE_SYNC)
+                      if (PQresultStatus(res.native_handle()) == PGRES_PIPELINE_SYNC)
                         continue;
 
                       assert(!self->result_handlers_.empty());

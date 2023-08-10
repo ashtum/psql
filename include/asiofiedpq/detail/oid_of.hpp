@@ -52,5 +52,5 @@ struct oid_of_impl<T>
     return omp.get_type_oid<T>();
   }
 };
-} // detail
-} // asiofiedpq
+} // namespace detail
+} // namespace asiofiedpq

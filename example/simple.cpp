@@ -8,12 +8,15 @@ namespace asio = boost::asio;
 
 asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
 {
-  auto print = [](auto res)
+  auto print = [](auto result)
   {
-    for (auto i = 0; i < PQnfields(res.get()); i++)
-      std::cout << PQfname(res.get(), i) << ":" << PQgetvalue(res.get(), 0, i) << '\t';
+    for (auto row : result)
+    {
+      for (auto value : row)
+        std::cout << value.name() << ":" << value.data() << '\t';
 
-    std::cout << std::endl;
+      std::cout << std::endl;
+    }
   };
 
   print(co_await conn.async_query("SELECT $1 as a, $2 as b, $3 as c;", { "one", 2, 3.0 }, asio::deferred));

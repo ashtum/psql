@@ -1,7 +1,7 @@
 #pragma once
 
-#include <vector>
 #include <tuple>
+#include <vector>
 
 namespace asiofiedpq
 {
@@ -57,5 +57,5 @@ template<class T>
 struct is_composite<T> : std::true_type
 {
 };
-} // detail
-} // asiofiedpq
+} // namespace detail
+} // namespace asiofiedpq

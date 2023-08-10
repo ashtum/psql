@@ -15,7 +15,7 @@ struct Employee
 
 struct Company
 {
-  int64_t id;
+  std::int64_t id;
   std::vector<Employee> employees;
 };
 
@@ -49,7 +49,7 @@ asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
 
   auto company = Company{ 104, { { "John Doe", "555-123-4567" }, { "Jane Smith", "555-987-6543" } } };
 
-  auto result = co_await conn.async_query("SELECT $1::company;", { oid_map, company }, asio::deferred);
+  auto result = co_await conn.async_query("SELECT $1 as company;", { oid_map, company }, asio::deferred);
 
-  std::cout << PQgetvalue(result.get(), 0, 0) << std::endl;
+  std::cout << result.at(0).at("company").data() << std::endl;
 }

@@ -42,7 +42,7 @@ public:
     std::vector<std::string_view> result;
     result.reserve(types_.size());
 
-    for (auto& [_, value] : types_)
+    for (const auto& [_, value] : types_)
       result.push_back(value.name);
 
     return result;

@@ -88,5 +88,5 @@ struct size_of_impl<T>
     return size;
   }
 };
-} // detail
-} // asiofiedpq
+} // namespace detail
+} // namespace asiofiedpq
