@@ -106,8 +106,9 @@ public:
     if (size() != sizeof...(Ts))
       throw std::runtime_error{ "Mismatched number of fields in the received row for conversion. Found " +
                                 std::to_string(size()) + " instead of " + std::to_string(sizeof...(Ts)) };
-    int i = 0;
-    return std::tuple{ operator[](i++).as<Ts>(omp)... };
+
+    return [&]<std::size_t... Is>(std::index_sequence<Is...>)
+    { return std::tuple{ operator[](Is).as<Ts>(omp)... }; }(std::index_sequence_for<Ts...>{});
   }
 
   value at(int index) const
