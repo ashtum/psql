@@ -29,7 +29,7 @@ struct size_of_impl<T>
 };
 
 template<>
-struct size_of_impl<char*>
+struct size_of_impl<const char*>
 {
   static std::size_t apply(const char* value)
   {

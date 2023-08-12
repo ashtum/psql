@@ -150,7 +150,7 @@ public:
                   it->params.values(),
                   it->params.lengths(),
                   it->params.formats(),
-                  0))
+                  1))
               co_return error::pqsendqueryparams_failed;
           }
           if (!PQpipelineSync(self->conn_.get()))
@@ -235,7 +235,7 @@ public:
               params.values(),
               params.lengths(),
               params.formats(),
-              0))
+              1))
           return error::pqsendqueryparams_failed;
         return {};
       },
@@ -266,7 +266,7 @@ public:
       [this, stmt_name = std::move(stmt_name), params = std::move(params)]() -> error_code
       {
         if (!PQsendQueryPrepared(
-              conn_.get(), stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 0))
+              conn_.get(), stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
           return error::pqsendqueryprepared_failed;
         return {};
       },

@@ -1,4 +1,5 @@
 #include <asiofiedpq/connection.hpp>
+#include <asiofiedpq/detail/deserialization.hpp>
 
 namespace asiofiedpq
 {
@@ -19,8 +20,11 @@ auto async_query_oids(
           type_names,
           asio::as_tuple(asio::deferred));
 
-        for (auto row : result)
-          omp->set_type_oids(row.at(0).data(), std::stoi(row.at(1).data()), std::stoi(row.at(2).data()));
+        for (const auto row : result)
+        {
+          const auto [name, type_oid, array_oid] = row.template as<std::string_view, uint32_t, uint32_t>();
+          omp->set_type_oids(name, type_oid, array_oid);
+        }
 
         co_return ec;
       },

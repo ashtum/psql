@@ -13,6 +13,13 @@ template<typename>
 struct builtin;
 
 template<>
+struct builtin<uint32_t>
+{
+  static constexpr auto type_oid  = 26;
+  static constexpr auto array_oid = 1028;
+};
+
+template<>
 struct builtin<bool>
 {
   static constexpr auto type_oid  = 16;
@@ -90,7 +97,7 @@ struct builtin<std::string>
 };
 
 template<>
-struct builtin<char*>
+struct builtin<const char*>
 {
   static constexpr auto type_oid  = 25;
   static constexpr auto array_oid = 1009;

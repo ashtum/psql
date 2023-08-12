@@ -80,4 +80,6 @@ private:
     throw std::runtime_error{ "The specified type does not exist in the oid_map" };
   }
 };
+
+static const inline oid_map empty_omp;
 } // namespace asiofiedpq

@@ -31,7 +31,7 @@ struct serialize_impl<T>
 };
 
 template<>
-struct serialize_impl<char*>
+struct serialize_impl<const char*>
 {
   static void apply(const oid_map&, std::string* buffer, const char* value)
   {
@@ -88,11 +88,13 @@ template<typename T>
   requires is_array<T>::value
 struct serialize_impl<T>
 {
+  using value_type = std::decay_t<typename T::value_type>;
+  
   static void apply(const oid_map& omp, std::string* buffer, const T& array)
   {
     serialize<int32_t>(omp, buffer, 1);
     serialize<int32_t>(omp, buffer, 0);
-    serialize<int32_t>(omp, buffer, oid_of<typename T::value_type>(omp));
+    serialize<int32_t>(omp, buffer, oid_of<value_type>(omp));
     serialize<int32_t>(omp, buffer, std::size(array));
     serialize<int32_t>(omp, buffer, 0);
 

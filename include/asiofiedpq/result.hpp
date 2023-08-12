@@ -1,5 +1,7 @@
 #pragma once
 
+#include <asiofiedpq/detail/deserialization.hpp>
+
 #include <libpq-fe.h>
 
 #include <memory>
@@ -20,6 +22,21 @@ public:
     , row_{ row }
     , col_{ col }
   {
+  }
+
+  template<typename T>
+  T as(const oid_map& omp = empty_omp) const
+  {
+    auto value = T{};
+
+    const auto expected_oid = detail::oid_of<T>(omp);
+    if (expected_oid != oid())
+      throw std::runtime_error{ "Mismatched Object Identifiers (OIDs) in received and expected types. Found " +
+                                std::to_string(oid()) + " instead of " + std::to_string(expected_oid) };
+
+    detail::deserialize(omp, { data(), size() }, value);
+
+    return value;
   }
 
   const value* operator->() const noexcept
@@ -81,6 +98,16 @@ public:
   value operator[](int index) const noexcept
   {
     return value{ pg_result_, row_, index };
+  }
+
+  template<typename... Ts>
+  auto as(const oid_map& omp = empty_omp) const
+  {
+    if (size() != sizeof...(Ts))
+      throw std::runtime_error{ "Mismatched number of fields in the received row for conversion. Found " +
+                                std::to_string(size()) + " instead of " + std::to_string(sizeof...(Ts)) };
+    int i = 0;
+    return std::tuple{ operator[](i++).as<Ts>(omp)... };
   }
 
   value at(int index) const
@@ -246,6 +273,11 @@ public:
   PGresult* native_handle() const noexcept
   {
     return pg_result_.get();
+  }
+
+  std::string_view error_message() const noexcept
+  {
+    return PQresultErrorMessage(pg_result_.get());
   }
 
   [[nodiscard]] PGresult* release() noexcept

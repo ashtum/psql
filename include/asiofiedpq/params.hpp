@@ -17,8 +17,6 @@ class params
   std::vector<int> lengths_;
   std::vector<int> formats_;
 
-  static const inline oid_map empty_omp;
-
 public:
   params() = default;
 
@@ -26,6 +24,7 @@ public:
   params(const oid_map& omp, Ts&&... args)
     requires(!(std::is_same_v<asiofiedpq::params, std::decay_t<Ts>> || ...))
   {
+    buffer_.reserve(64);
     (add(omp, std::forward<Ts>(args)), ...);
     convert_offsets();
   }
@@ -65,11 +64,11 @@ public:
 
 private:
   template<typename T>
-  void add(const oid_map& omp, const T& value)
+  void add(const oid_map& omp, T&& value)
   {
     types_.push_back(detail::oid_of<std::decay_t<T>>(omp));
-    lengths_.push_back(detail::size_of(value));
-    detail::serialize(omp, &buffer_, value);
+    lengths_.push_back(detail::size_of<std::decay_t<T>>(value));
+    detail::serialize<std::decay_t<T>>(omp, &buffer_, value);
   }
 
   void convert_offsets()

@@ -1,4 +1,5 @@
 #include <asiofiedpq/connection.hpp>
+#include <asiofiedpq/detail/deserialization.hpp>
 #include <asiofiedpq/query_oids.hpp>
 
 #include <boost/asio/awaitable.hpp>
@@ -49,7 +50,13 @@ asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
 
   auto company = Company{ 104, { { "John Doe", "555-123-4567" }, { "Jane Smith", "555-987-6543" } } };
 
-  auto result = co_await conn.async_query("SELECT $1 as company;", { oid_map, company }, asio::deferred);
+  auto result = co_await conn.async_query("SELECT $1 as co;", { oid_map, company }, asio::deferred);
 
-  std::cout << result.at(0).at("company").data() << std::endl;
+  auto [id, employees] = result.at(0).at("co").as<Company>(oid_map);
+
+  std::cout << "company id:" << id << std::endl;
+
+  std::cout << "company employees:" << std::endl;
+  for (const auto& e : employees)
+    std::cout << "name:" << e.name << '\t' << "phone:" << e.phone << '\t' << std::endl;
 }
