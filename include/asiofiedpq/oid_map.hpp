@@ -1,10 +1,11 @@
 #pragma once
 
+#include <asiofiedpq/detail/type_traits.hpp>
+
 #include <map>
 #include <stdexcept>
 #include <string>
 #include <typeindex>
-#include <vector>
 
 namespace asiofiedpq
 {
@@ -24,7 +25,7 @@ class oid_map
 
 public:
   template<typename T>
-    requires requires(T) { user_defined<T>{}; }
+    requires is_user_defined<T>::value
   void register_type(std::string name)
   {
     types_.emplace(typeid(T), pg_type_info{ std::move(name) });
@@ -49,14 +50,14 @@ public:
   }
 
   template<typename T>
-    requires requires(T) { user_defined<T>{}; }
+    requires is_user_defined<T>::value
   int get_type_oid() const
   {
     return find_pg_type_info(typeid(T)).type_oid;
   }
 
   template<typename T>
-    requires requires(T) { user_defined<T>{}; }
+    requires is_user_defined<T>::value
   int get_array_oid() const
   {
     return find_pg_type_info(typeid(T)).array_oid;

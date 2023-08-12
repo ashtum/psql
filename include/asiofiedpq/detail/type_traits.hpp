@@ -8,6 +8,17 @@ namespace asiofiedpq
 template<typename>
 struct user_defined;
 
+template<typename>
+struct is_user_defined : std::false_type
+{
+};
+
+template<typename T>
+  requires requires(T) { user_defined<T>{}; }
+struct is_user_defined<T> : std::true_type
+{
+};
+
 namespace detail
 {
 template<class T>
@@ -17,17 +28,6 @@ struct is_array : std::false_type
 
 template<class T>
 struct is_array<std::vector<T>> : std::true_type
-{
-};
-
-template<typename>
-struct is_user_defined : std::false_type
-{
-};
-
-template<typename T>
-  requires requires(T) { user_defined<T>{}; }
-struct is_user_defined<T> : std::true_type
 {
 };
 
