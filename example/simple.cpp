@@ -6,6 +6,7 @@
 #include <iostream>
 
 namespace asio = boost::asio;
+namespace ch   = std::chrono;
 
 asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
 {
@@ -18,11 +19,11 @@ asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
   for (const auto& value : r2.at(0).at("array").as<std::vector<std::string_view>>())
     std::cout << value << std::endl;
 
-  auto r3    = co_await conn.async_query("SELECT (1, 2, '3456'::TEXT) as record;", asio::deferred);
-  auto tuple = r3.at(0).at("record").as<std::tuple<int, int, std::string_view>>();
-  std::cout << std::get<0>(tuple) << std::get<1>(tuple) << std::get<2>(tuple) << std::endl;
+  auto r3       = co_await conn.async_query("SELECT 1 as f1, (2.0::FLOAT4, '3'::TEXT) as f2;", asio::deferred);
+  auto [f1, f2] = r3.at(0).as<int, std::tuple<float, std::string_view>>();
+  std::cout << f1 << std::get<0>(f2) << std::get<1>(f2) << std::endl;
 
-  // print(co_await conn.async_query("SELECT $1 as bool_array;", std::vector{ true, false, true }, asio::deferred));
-
-  // print(co_await conn.async_query("SELECT NOW()::timestamp(0) as timestamp;", asio::deferred));
+  auto r4      = co_await conn.async_query("SELECT NOW()::timestamp(0) as timestamp;", asio::deferred);
+  auto db_time = r4.at(0).at("timestamp").as<ch::system_clock::time_point>().time_since_epoch();
+  std::cout << "database timestamp:" << ch::duration_cast<ch::seconds>(db_time) << std::endl;
 }

@@ -2,6 +2,7 @@
 
 #include <asiofiedpq/detail/type_traits.hpp>
 
+#include <chrono>
 #include <string>
 #include <string_view>
 
@@ -25,6 +26,15 @@ struct size_of_impl<T>
   static std::size_t apply(const T&)
   {
     return sizeof(T);
+  }
+};
+
+template<>
+struct size_of_impl<std::chrono::system_clock::time_point>
+{
+  static std::size_t apply(const std::chrono::system_clock::time_point&)
+  {
+    return 8;
   }
 };
 

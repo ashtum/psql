@@ -31,6 +31,18 @@ struct serialize_impl<T>
 };
 
 template<>
+struct serialize_impl<std::chrono::system_clock::time_point>
+{
+  static void apply(const oid_map& omp, std::string* buffer, const std::chrono::system_clock::time_point& value)
+  {
+    const int64_t int_value = (std::chrono::duration_cast<std::chrono::microseconds>(value.time_since_epoch()) -
+                               std::chrono::microseconds{ 946684800000000 })
+                                .count();
+    serialize(omp, buffer, int_value);
+  }
+};
+
+template<>
 struct serialize_impl<const char*>
 {
   static void apply(const oid_map&, std::string* buffer, const char* value)
@@ -89,7 +101,7 @@ template<typename T>
 struct serialize_impl<T>
 {
   using value_type = std::decay_t<typename T::value_type>;
-  
+
   static void apply(const oid_map& omp, std::string* buffer, const T& array)
   {
     serialize<int32_t>(omp, buffer, 1);
