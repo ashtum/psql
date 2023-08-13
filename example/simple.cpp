@@ -14,7 +14,8 @@ asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
   std::cout << a << "-" << b << std::endl;
 
   // Example 2
-  co_await conn.async_query("CREATE TABLE IF NOT EXISTS actors (name TEXT, age INT);", asio::deferred);
+  co_await conn.async_query("DROP TABLE IF EXISTS actors;", asio::deferred);
+  co_await conn.async_query("CREATE TABLE actors (name TEXT, age INT);", asio::deferred);
   co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", { "Bruce Lee", 32 }, asio::deferred);
   co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", { "Jackie Chan", 70 }, asio::deferred);
   auto actors = co_await conn.async_query("SELECT name, age from actors", asio::deferred);
