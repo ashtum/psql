@@ -242,6 +242,35 @@ public:
       std::forward<decltype(token)>(token));
   }
 
+  template<typename... Ts>
+    requires(sizeof...(Ts) > 0)
+  auto async_query(std::string query, asio::completion_token_for<void(error_code, Ts...)> auto&& token)
+  {
+    return async_query<Ts...>(std::move(query), {}, std::forward<decltype(token)>(token));
+  }
+
+  template<typename... Ts>
+    requires(sizeof...(Ts) > 0)
+  auto async_query(std::string query, params params, asio::completion_token_for<void(error_code, Ts...)> auto&& token)
+  {
+    return asio::async_initiate<decltype(token), void(error_code, Ts...)>(
+      asio::experimental::co_composed<void(error_code, Ts...)>(
+        [](auto state, connection* conn, auto query, auto params) -> void
+        {
+          state.on_cancellation_complete_with(asio::error::operation_aborted, Ts{}...);
+          auto [ec, result] = co_await conn->async_query(std::move(query), std::move(params), deferred_tuple);
+          if (ec)
+            co_return { ec, Ts{}... };
+
+          co_return std::tuple_cat(std::tuple{ ec }, result.at(0).template as<Ts...>());
+        },
+        socket_),
+      token,
+      this,
+      std::move(query),
+      std::move(params));
+  }
+
   auto async_prepare(
     std::string stmt_name,
     std::string query,
