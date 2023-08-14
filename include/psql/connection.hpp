@@ -95,10 +95,10 @@ public:
           self->socket_.assign(asio::ip::tcp::v4(), PQsocket(self->conn_.get()));
 
           if (PQstatus(self->conn_.get()) == CONNECTION_BAD)
-            co_return error::pqstatus_failed;
+            co_return error::pq_status_failed;
 
           if (PQsetnonblocking(self->conn_.get(), 1))
-            co_return error::pqsetnonblocking_failed;
+            co_return error::pq_set_non_blocking_failed;
 
           PQsetNoticeProcessor(
             self->conn_.get(), +[](void*, const char*) {}, nullptr);
@@ -123,7 +123,7 @@ public:
           }
 
           if (!PQenterPipelineMode(self->conn_.get()))
-            co_return error::pqenterpipelinemode_failed;
+            co_return error::pq_enter_pipeline_mode_failed;
 
           co_return {};
         },
@@ -152,10 +152,10 @@ public:
                   it->params.lengths(),
                   it->params.formats(),
                   1))
-              co_return error::pqsendqueryparams_failed;
+              co_return error::pq_send_query_params_failed;
           }
           if (!PQpipelineSync(self->conn_.get()))
-            co_return error::pqpipelinesync_failed;
+            co_return error::pq_pipeline_sync_failed;
 
           self->write_cv_.cancel_one();
 
@@ -237,7 +237,7 @@ public:
               params.lengths(),
               params.formats(),
               1))
-          return error::pqsendqueryparams_failed;
+          return error::pq_send_query_params_failed;
         return {};
       },
       std::forward<decltype(token)>(token));
@@ -252,7 +252,7 @@ public:
       [this, query = std::move(query), stmt_name = std::move(stmt_name)]() -> error_code
       {
         if (!PQsendPrepare(conn_.get(), stmt_name.data(), query.data(), 0, nullptr))
-          return error::pqsendprepare_failed;
+          return error::pq_send_prepare_failed;
         return {};
       },
       std::forward<decltype(token)>(token));
@@ -268,7 +268,7 @@ public:
       {
         if (!PQsendQueryPrepared(
               conn_.get(), stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
-          return error::pqsendqueryprepared_failed;
+          return error::pq_send_query_prepared_failed;
         return {};
       },
       token);
@@ -280,7 +280,7 @@ public:
       [this, stmt_name = std::move(stmt_name)]() -> error_code
       {
         if (!PQsendDescribePrepared(conn_.get(), stmt_name.data()))
-          return error::pqsenddescribeprepared_failed;
+          return error::pq_send_describe_prepared_failed;
         return {};
       },
       std::forward<decltype(token)>(token));
@@ -292,7 +292,7 @@ public:
       [this, portal_name = std::move(portal_name)]() -> error_code
       {
         if (!PQsendDescribePortal(conn_.get(), portal_name.data()))
-          return error::pqsenddescribeportal_failed;
+          return error::pq_send_describe_portal_failed;
         return {};
       },
       std::forward<decltype(token)>(token));
@@ -370,7 +370,7 @@ public:
                       co_return ec;
 
                     if (!PQconsumeInput(self->conn_.get()))
-                      co_return error::pqconsumeinput_failed;
+                      co_return error::pq_consume_input_failed;
                   }
                 },
                 self->socket_),
@@ -414,7 +414,7 @@ private:
             co_return { ec, nullptr };
 
           if (!PQpipelineSync(self->conn_.get()))
-            co_return { error::pqpipelinesync_failed, nullptr };
+            co_return { error::pq_pipeline_sync_failed, nullptr };
 
           self->write_cv_.cancel_one();
 

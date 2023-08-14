@@ -7,16 +7,16 @@ namespace psql
 enum class error
 {
   connection_failed = 1,
-  pqstatus_failed,
-  pqsetnonblocking_failed,
-  pqenterpipelinemode_failed,
-  pqsendqueryparams_failed,
-  pqsendprepare_failed,
-  pqsendqueryprepared_failed,
-  pqsenddescribeprepared_failed,
-  pqsenddescribeportal_failed,
-  pqpipelinesync_failed,
-  pqconsumeinput_failed
+  pq_status_failed,
+  pq_set_non_blocking_failed,
+  pq_enter_pipeline_mode_failed,
+  pq_send_query_params_failed,
+  pq_send_prepare_failed,
+  pq_send_query_prepared_failed,
+  pq_send_describe_prepared_failed,
+  pq_send_describe_portal_failed,
+  pq_pipeline_sync_failed,
+  pq_consume_input_failed
 };
 
 inline const boost::system::error_category& error_category()
@@ -36,26 +36,26 @@ inline const boost::system::error_category& error_category()
       {
         case error::connection_failed:
           return "Connection to database failed";
-        case error::pqstatus_failed:
-          return "PQstatus failed";
-        case error::pqsetnonblocking_failed:
-          return "PQsetnonblocking failed";
-        case error::pqenterpipelinemode_failed:
-          return "PQenterPipelineMode failed";
-        case error::pqsendqueryparams_failed:
-          return "PQsendQueryParams failed";
-        case error::pqsendprepare_failed:
-          return "PQsendPrepare failed";
-        case error::pqsendqueryprepared_failed:
-          return "PQsendQueryPrepared failed";
-        case error::pqsenddescribeprepared_failed:
-          return "PQsendDescribePrepared failed";
-        case error::pqsenddescribeportal_failed:
-          return "PQsendDescribePortal failed";
-        case error::pqpipelinesync_failed:
-          return "PQpipelineSync failed";
-        case error::pqconsumeinput_failed:
-          return "PQconsumeInput failed";
+        case error::pq_status_failed:
+          return "PQstatus failed, check error message on connection";
+        case error::pq_set_non_blocking_failed:
+          return "PQsetnonblocking failed, check error message on connection";
+        case error::pq_enter_pipeline_mode_failed:
+          return "PQenterPipelineMode failed, check error message on connection";
+        case error::pq_send_query_params_failed:
+          return "PQsendQueryParams failed, check error message on connection";
+        case error::pq_send_prepare_failed:
+          return "PQsendPrepare failed, check error message on connection";
+        case error::pq_send_query_prepared_failed:
+          return "PQsendQueryPrepared failed, check error message on connection";
+        case error::pq_send_describe_prepared_failed:
+          return "PQsendDescribePrepared failed, check error message on connection";
+        case error::pq_send_describe_portal_failed:
+          return "PQsendDescribePortal failed, check error message on connection";
+        case error::pq_pipeline_sync_failed:
+          return "PQpipelineSync failed, check error message on connection";
+        case error::pq_consume_input_failed:
+          return "PQconsumeInput failed, check error message on connection";
         default:
           return "Unknown error";
       }
