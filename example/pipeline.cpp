@@ -20,7 +20,7 @@ asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
 
   for (const auto row : pipeline.back().result)
   {
-    const auto [phone, name] = row.as<std::string_view, std::string_view>();
+    const auto [phone, name] = as<std::string_view, std::string_view>(row);
     std::cout << name << ":" << phone << std::endl;
   }
 }

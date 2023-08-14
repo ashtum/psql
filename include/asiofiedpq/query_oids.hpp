@@ -22,7 +22,7 @@ auto async_query_oids(
 
         for (const auto row : result)
         {
-          const auto [name, type_oid, array_oid] = row.template as<std::string_view, uint32_t, uint32_t>();
+          const auto [name, type_oid, array_oid] = as<std::string_view, uint32_t, uint32_t>(row);
           omp->set_type_oids(name, type_oid, array_oid);
         }
 

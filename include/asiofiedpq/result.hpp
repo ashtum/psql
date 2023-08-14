@@ -24,21 +24,6 @@ public:
   {
   }
 
-  template<typename T>
-  T as(const oid_map& omp = empty_omp) const
-  {
-    auto value = T{};
-
-    const auto expected_oid = detail::oid_of<T>(omp);
-    if (expected_oid != oid())
-      throw std::runtime_error{ "Mismatched Object Identifiers (OIDs) in received and expected types. Found " +
-                                std::to_string(oid()) + " instead of " + std::to_string(expected_oid) };
-
-    detail::deserialize(omp, { data(), size() }, value);
-
-    return value;
-  }
-
   const value* operator->() const noexcept
   {
     return this;
@@ -70,6 +55,21 @@ public:
   }
 };
 
+template<typename T>
+T as(const value& value, const oid_map& omp = empty_omp)
+{
+  auto result = T{};
+
+  const auto expected_oid = detail::oid_of<T>(omp);
+  if (expected_oid != value.oid())
+    throw std::runtime_error{ "Mismatched Object Identifiers (OIDs) in received and expected types. Found " +
+                              std::to_string(value.oid()) + " instead of " + std::to_string(expected_oid) };
+
+  detail::deserialize(omp, { value.data(), value.size() }, result);
+
+  return result;
+}
+
 class row
 {
   const PGresult* pg_result_{};
@@ -100,17 +100,6 @@ public:
     return value{ pg_result_, row_, index };
   }
 
-  template<typename... Ts>
-  auto as(const oid_map& omp = empty_omp) const
-  {
-    if (size() != sizeof...(Ts))
-      throw std::runtime_error{ "Mismatched number of fields in the received row for conversion. Found " +
-                                std::to_string(size()) + " instead of " + std::to_string(sizeof...(Ts)) };
-
-    return [&]<std::size_t... Is>(std::index_sequence<Is...>)
-    { return std::tuple{ operator[](Is).as<Ts>(omp)... }; }(std::index_sequence_for<Ts...>{});
-  }
-
   value at(int index) const
   {
     if (static_cast<size_t>(index) < size())
@@ -137,6 +126,20 @@ public:
     return size() == 0;
   }
 };
+
+template<typename T>
+auto as(const row& row, const oid_map& omp = empty_omp)
+{
+  return as<T>(row.at(0), omp);
+}
+
+template<typename S, typename T, typename... Ts>
+auto as(const row& row, const oid_map& omp = empty_omp)
+{
+  return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+    return std::tuple{ as<S>(row.at(0), omp), as<T>(row.at(1), omp), as<Ts>(row.at(Is + 2), omp)... };
+  }(std::index_sequence_for<Ts...>{});
+}
 
 class row::const_iterator
 {
@@ -362,5 +365,11 @@ inline result::const_iterator result::begin() const noexcept
 inline result::const_iterator result::end() const noexcept
 {
   return const_iterator{ pg_result_.get(), static_cast<int>(size()) };
+}
+
+template<typename... Ts>
+auto as(const result& result, const oid_map& omp = empty_omp)
+{
+  return as<Ts...>(result.at(0), omp);
 }
 } // namespace asiofiedpq

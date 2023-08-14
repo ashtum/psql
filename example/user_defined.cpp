@@ -52,7 +52,7 @@ asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
 
   auto result = co_await conn.async_query("SELECT $1 as co;", { oid_map, company }, asio::deferred);
 
-  auto [id, employees] = result.at(0).at("co").as<Company>(oid_map);
+  auto [id, employees] = as<Company>(result, oid_map);
 
   std::cout << "company id:" << id << std::endl;
 
