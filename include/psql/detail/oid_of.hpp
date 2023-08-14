@@ -1,10 +1,10 @@
 #pragma once
 
-#include <asiofiedpq/detail/builtin.hpp>
-#include <asiofiedpq/detail/type_traits.hpp>
-#include <asiofiedpq/oid_map.hpp>
+#include <psql/detail/builtin.hpp>
+#include <psql/detail/type_traits.hpp>
+#include <psql/oid_map.hpp>
 
-namespace asiofiedpq
+namespace psql
 {
 namespace detail
 {
@@ -53,4 +53,4 @@ struct oid_of_impl<T>
   }
 };
 } // namespace detail
-} // namespace asiofiedpq
+} // namespace psql

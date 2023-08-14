@@ -1,7 +1,7 @@
-#include <asiofiedpq/connection.hpp>
-#include <asiofiedpq/detail/deserialization.hpp>
+#include <psql/connection.hpp>
+#include <psql/detail/deserialization.hpp>
 
-namespace asiofiedpq
+namespace psql
 {
 auto async_query_oids(
   connection& conn,
@@ -33,4 +33,4 @@ auto async_query_oids(
     &conn,
     &omp);
 }
-} // namespace asiofiedpq
+} // namespace psql

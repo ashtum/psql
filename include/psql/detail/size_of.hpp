@@ -1,12 +1,12 @@
 #pragma once
 
-#include <asiofiedpq/detail/type_traits.hpp>
+#include <psql/detail/type_traits.hpp>
 
 #include <chrono>
 #include <string>
 #include <string_view>
 
-namespace asiofiedpq
+namespace psql
 {
 namespace detail
 {
@@ -99,4 +99,4 @@ struct size_of_impl<T>
   }
 };
 } // namespace detail
-} // namespace asiofiedpq
+} // namespace psql

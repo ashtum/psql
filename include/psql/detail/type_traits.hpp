@@ -3,7 +3,7 @@
 #include <tuple>
 #include <vector>
 
-namespace asiofiedpq
+namespace psql
 {
 template<typename>
 struct user_defined;
@@ -58,4 +58,4 @@ struct is_composite<T> : std::true_type
 {
 };
 } // namespace detail
-} // namespace asiofiedpq
+} // namespace psql

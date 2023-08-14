@@ -1,5 +1,5 @@
-#include <asiofiedpq/connection.hpp>
-#include <asiofiedpq/detail/deserialization.hpp>
+#include <psql/connection.hpp>
+#include <psql/detail/deserialization.hpp>
 
 #include <boost/asio/awaitable.hpp>
 
@@ -7,7 +7,7 @@
 
 namespace asio = boost::asio;
 
-asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
+asio::awaitable<void> run_exmaple(psql::connection& conn)
 {
   // Example 1
   auto [a, b] = as<std::string, int>(co_await conn.async_query("SELECT 'one'::TEXT, 2;", asio::deferred));

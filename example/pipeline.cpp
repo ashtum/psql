@@ -1,4 +1,4 @@
-#include <asiofiedpq/connection.hpp>
+#include <psql/connection.hpp>
 
 #include <boost/asio/awaitable.hpp>
 
@@ -6,9 +6,9 @@
 
 namespace asio = boost::asio;
 
-asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
+asio::awaitable<void> run_exmaple(psql::connection& conn)
 {
-  auto pipeline = std::vector<asiofiedpq::pipelined>{};
+  auto pipeline = std::vector<psql::pipelined>{};
 
   pipeline.push_back({ "DROP TABLE IF EXISTS phonebook;" });
   pipeline.push_back({ "CREATE TABLE phonebook(phone TEXT, name TEXT);" });

@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace asiofiedpq
+namespace psql
 {
 namespace detail
 {
@@ -110,4 +110,4 @@ struct builtin<std::tuple<Ts...>>
   static constexpr auto array_oid = 2287;
 };
 } // namespace detail
-} // namespace asiofiedpq
+} // namespace psql

@@ -1,6 +1,6 @@
-#include <asiofiedpq/connection.hpp>
-#include <asiofiedpq/detail/deserialization.hpp>
-#include <asiofiedpq/query_oids.hpp>
+#include <psql/connection.hpp>
+#include <psql/detail/deserialization.hpp>
+#include <psql/query_oids.hpp>
 
 #include <boost/asio/awaitable.hpp>
 
@@ -20,7 +20,7 @@ struct Company
   std::vector<Employee> employees;
 };
 
-namespace asiofiedpq
+namespace psql
 {
 template<>
 struct user_defined<Employee>
@@ -35,18 +35,18 @@ struct user_defined<Company>
 };
 }
 
-asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn)
+asio::awaitable<void> run_exmaple(psql::connection& conn)
 {
   co_await conn.async_query("DROP TYPE IF EXISTS employee;", asio::deferred);
   co_await conn.async_query("DROP TYPE IF EXISTS company;", asio::deferred);
   co_await conn.async_query("CREATE TYPE employee AS (name TEXT, phone TEXT);", asio::deferred);
   co_await conn.async_query("CREATE TYPE company AS (id INT8, employees employee[]);", asio::deferred);
 
-  auto oid_map = asiofiedpq::oid_map{};
+  auto oid_map = psql::oid_map{};
   oid_map.register_type<Employee>("employee");
   oid_map.register_type<Company>("company");
 
-  co_await asiofiedpq::async_query_oids(conn, oid_map, asio::deferred);
+  co_await psql::async_query_oids(conn, oid_map, asio::deferred);
 
   auto company = Company{ 104, { { "John Doe", "555-123-4567" }, { "Jane Smith", "555-987-6543" } } };
 

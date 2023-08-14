@@ -1,11 +1,11 @@
 #pragma once
 
-#include <asiofiedpq/detail/oid_of.hpp>
-#include <asiofiedpq/detail/size_of.hpp>
+#include <psql/detail/oid_of.hpp>
+#include <psql/detail/size_of.hpp>
 
 #include <boost/endian.hpp>
 
-namespace asiofiedpq
+namespace psql
 {
 namespace detail
 {
@@ -118,4 +118,4 @@ struct serialize_impl<T>
   }
 };
 } // namespace detail
-} // namespace asiofiedpq
+} // namespace psql

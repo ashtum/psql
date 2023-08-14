@@ -1,9 +1,9 @@
 #pragma once
 
-#include <asiofiedpq/detail/result_handler.hpp>
-#include <asiofiedpq/error.hpp>
-#include <asiofiedpq/params.hpp>
-#include <asiofiedpq/result.hpp>
+#include <psql/detail/result_handler.hpp>
+#include <psql/error.hpp>
+#include <psql/params.hpp>
+#include <psql/result.hpp>
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/deferred.hpp>
@@ -14,22 +14,22 @@
 
 #include <queue>
 
-namespace asiofiedpq
+namespace psql
 {
 namespace asio = boost::asio;
 
 struct pipelined
 {
   std::string query;
-  asiofiedpq::params params;
-  asiofiedpq::result result;
+  psql::params params;
+  psql::result result;
 
   pipelined(std::string query)
     : query{ std::move(query) }
   {
   }
 
-  pipelined(std::string query, asiofiedpq::params params)
+  pipelined(std::string query, psql::params params)
     : query{ std::move(query) }
     , params{ std::move(params) }
   {
@@ -459,4 +459,4 @@ private:
       std::move(query_fn));
   }
 };
-} // namespace asiofiedpq
+} // namespace psql

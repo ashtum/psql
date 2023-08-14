@@ -1,12 +1,12 @@
 #pragma once
 
-#include <asiofiedpq/detail/deserialization.hpp>
+#include <psql/detail/deserialization.hpp>
 
 #include <libpq-fe.h>
 
 #include <memory>
 
-namespace asiofiedpq
+namespace psql
 {
 class value
 {
@@ -372,4 +372,4 @@ auto as(const result& result, const oid_map& omp = empty_omp)
 {
   return as<Ts...>(result.at(0), omp);
 }
-} // namespace asiofiedpq
+} // namespace psql

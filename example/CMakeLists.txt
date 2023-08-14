@@ -8,6 +8,6 @@ target_compile_options(simple PRIVATE -Wall -Wfatal-errors -Wextra -Wnon-virtual
 target_compile_options(pipeline PRIVATE -Wall -Wfatal-errors -Wextra -Wnon-virtual-dtor -pedantic)
 target_compile_options(user_defined PRIVATE -Wall -Wfatal-errors -Wextra -Wnon-virtual-dtor -pedantic)
 
-target_link_libraries(simple asiofiedpq)
-target_link_libraries(pipeline asiofiedpq)
-target_link_libraries(user_defined asiofiedpq)
+target_link_libraries(simple psql)
+target_link_libraries(pipeline psql)
+target_link_libraries(user_defined psql)

@@ -1,4 +1,4 @@
-#include <asiofiedpq/connection.hpp>
+#include <psql/connection.hpp>
 
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/io_context.hpp>
@@ -7,13 +7,13 @@
 
 namespace asio = boost::asio;
 
-asio::awaitable<void> run_exmaple(asiofiedpq::connection& conn);
+asio::awaitable<void> run_exmaple(psql::connection& conn);
 
 asio::awaitable<void> async_main()
 {
   using namespace asio::experimental::awaitable_operators;
 
-  auto conn = asiofiedpq::connection{ co_await asio::this_coro::executor };
+  auto conn = psql::connection{ co_await asio::this_coro::executor };
 
   co_await conn.async_connect("postgresql://postgres:postgres@172.18.0.2:5432", asio::deferred);
 

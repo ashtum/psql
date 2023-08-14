@@ -1,13 +1,13 @@
 #pragma once
 
-#include <asiofiedpq/detail/serialization.hpp>
+#include <psql/detail/serialization.hpp>
 
 #include <libpq-fe.h>
 
 #include <array>
 #include <memory>
 
-namespace asiofiedpq
+namespace psql
 {
 class params
 {
@@ -22,7 +22,7 @@ public:
 
   template<typename... Ts>
   params(const oid_map& omp, Ts&&... args)
-    requires(!(std::is_same_v<asiofiedpq::params, std::decay_t<Ts>> || ...))
+    requires(!(std::is_same_v<psql::params, std::decay_t<Ts>> || ...))
   {
     buffer_.reserve(64);
     (add(omp, std::forward<Ts>(args)), ...);
@@ -32,7 +32,7 @@ public:
   template<typename... Ts>
   params(Ts&&... args)
     requires(
-      !((std::is_same_v<oid_map, std::decay_t<Ts>> || std::is_same_v<asiofiedpq::params, std::decay_t<Ts>>) || ...))
+      !((std::is_same_v<oid_map, std::decay_t<Ts>> || std::is_same_v<psql::params, std::decay_t<Ts>>) || ...))
     : params{ empty_omp, std::forward<Ts>(args)... }
   {
   }
@@ -81,4 +81,4 @@ private:
     }
   }
 };
-} // namespace asiofiedpq
+} // namespace psql

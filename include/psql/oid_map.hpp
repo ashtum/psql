@@ -1,13 +1,13 @@
 #pragma once
 
-#include <asiofiedpq/detail/type_traits.hpp>
+#include <psql/detail/type_traits.hpp>
 
 #include <map>
 #include <stdexcept>
 #include <string>
 #include <typeindex>
 
-namespace asiofiedpq
+namespace psql
 {
 template<typename>
 struct user_defined;
@@ -83,4 +83,4 @@ private:
 };
 
 static const inline oid_map empty_omp;
-} // namespace asiofiedpq
+} // namespace psql

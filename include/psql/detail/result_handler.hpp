@@ -1,11 +1,11 @@
 #pragma once
 
-#include <asiofiedpq/result.hpp>
+#include <psql/result.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-namespace asiofiedpq
+namespace psql
 {
 namespace detail
 {
@@ -66,4 +66,4 @@ public:
   virtual ~result_handler() = default;
 };
 } // namespace detail
-} // namespace asiofiedpq
+} // namespace psql

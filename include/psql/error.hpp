@@ -2,7 +2,7 @@
 
 #include <boost/system/error_code.hpp>
 
-namespace asiofiedpq
+namespace psql
 {
 enum class error
 {
@@ -27,7 +27,7 @@ inline const boost::system::error_category& error_category()
 
     const char* name() const noexcept override
     {
-      return "asiofiedpq";
+      return "psql";
     }
 
     std::string message(int ev) const override
@@ -71,12 +71,12 @@ inline boost::system::error_code make_error_code(error e)
 {
   return { static_cast<int>(e), error_category() };
 }
-} // namespace asiofiedpq
+} // namespace psql
 
 namespace boost::system
 {
 template<>
-struct is_error_code_enum<asiofiedpq::error>
+struct is_error_code_enum<psql::error>
 {
   static const bool value = true;
 };
