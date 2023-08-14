@@ -18,21 +18,44 @@ namespace psql
 {
 namespace asio = boost::asio;
 
-struct pipelined
-{
-  std::string query;
-  psql::params params;
-  psql::result result;
+class connection;
 
-  pipelined(std::string query)
-    : query{ std::move(query) }
+class pipeline
+{
+protected:
+  enum class type
   {
+    query,
+    prepared,
+    query_prepared
+  };
+
+  struct operation
+  {
+    type type;
+    std::string stmt_name;
+    std::string query;
+    params params;
+  };
+
+  std::vector<operation> operations;
+
+  friend connection;
+
+public:
+  void enque_query(std::string query, params params = {})
+  {
+    operations.push_back({ type::query, {}, std::move(query), std::move(params) });
   }
 
-  pipelined(std::string query, psql::params params)
-    : query{ std::move(query) }
-    , params{ std::move(params) }
+  void enque_prepared(std::string stmt_name, std::string query)
   {
+    operations.push_back({ type::prepared, std::move(stmt_name), std::move(query), {} });
+  }
+
+  void enque_query_prepared(std::string stmt_name, std::string query, params params = {})
+  {
+    operations.push_back({ type::query_prepared, std::move(stmt_name), std::move(query), std::move(params) });
   }
 };
 
@@ -133,69 +156,87 @@ public:
       std::move(conninfo));
   }
 
-  auto async_exec_pipeline(auto first, auto last, asio::completion_token_for<void(error_code)> auto&& token)
+  auto async_exec_pipeline(pipeline& pl, asio::completion_token_for<void(error_code, std::vector<result>)> auto&& token)
   {
-    return asio::async_initiate<decltype(token), void(error_code)>(
-      asio::experimental::co_composed<void(error_code)>(
-        [](auto state, connection* self, auto first, auto last) -> void
+    return asio::async_initiate<decltype(token), void(error_code, std::vector<result>)>(
+      asio::experimental::co_composed<void(error_code, std::vector<result>)>(
+        [](auto state, connection* self, pipeline* pl) -> void
         {
-          state.on_cancellation_complete_with(asio::error::operation_aborted);
+          state.on_cancellation_complete_with(asio::error::operation_aborted, {});
 
-          for (auto it = first; it != last; it++)
+          for (const auto& op : pl->operations)
           {
-            if (!PQsendQueryParams(
-                  self->conn_.get(),
-                  it->query.data(),
-                  it->params.count(),
-                  it->params.types(),
-                  it->params.values(),
-                  it->params.lengths(),
-                  it->params.formats(),
-                  1))
-              co_return error::pq_send_query_params_failed;
+            switch (op.type)
+            {
+              using enum pipeline::type;
+              case query:
+                if (!PQsendQueryParams(
+                      self->conn_.get(),
+                      op.query.data(),
+                      op.params.count(),
+                      op.params.types(),
+                      op.params.values(),
+                      op.params.lengths(),
+                      op.params.formats(),
+                      1))
+                  co_return { error::pq_send_query_params_failed, std::vector<result>{} };
+                break;
+              case prepared:
+                if (!PQsendPrepare(self->conn_.get(), op.stmt_name.data(), op.query.data(), 0, nullptr))
+                  co_return { error::pq_send_prepare_failed, std::vector<result>{} };
+                break;
+              case query_prepared:
+                if (!PQsendQueryPrepared(
+                      self->conn_.get(),
+                      op.stmt_name.data(),
+                      op.params.count(),
+                      op.params.values(),
+                      op.params.lengths(),
+                      op.params.formats(),
+                      1))
+                  co_return { error::pq_send_query_prepared_failed, std::vector<result>{} };
+                break;
+            }
           }
+
           if (!PQpipelineSync(self->conn_.get()))
-            co_return error::pq_pipeline_sync_failed;
+            co_return { error::pq_pipeline_sync_failed, std::vector<result>{} };
 
           self->write_cv_.cancel_one();
 
+          auto results = std::vector<result>{ pl->operations.size() };
+
           class pipeline_result_handler : public detail::result_handler
           {
-            decltype(first) first_;
-            decltype(last) last_;
-            size_t n_dummy_{ 0 };
+            pipeline* pl_{};
+            std::vector<result>* results_{};
+            size_t index_{};
+            bool is_dummy_{ false };
 
           public:
-            pipeline_result_handler(decltype(first) first, decltype(last) last, asio::any_io_executor exec)
+            pipeline_result_handler(pipeline* pl, std::vector<result>* results, asio::any_io_executor exec)
               : result_handler{ std::move(exec) }
-              , first_{ first }
-              , last_{ last }
+              , pl_{ pl }
+              , results_{ results }
             {
             }
 
-            void handle(result res) override
+            void handle(result result) override
             {
-              if (n_dummy_)
-              {
-                if (--n_dummy_ == 0)
-                  this->complete();
-              }
-              else
-              {
-                first_->result = std::move(res);
-                if (++first_ == last_)
-                  this->complete();
-              }
+              if (!is_dummy_)
+                results_->operator[](index_) = std::move(result);
+
+              if (++index_ == results_->size())
+                this->complete();
             }
 
             void dumify()
             {
-              // Swallows the remaining results without touching the iterators (which have become invalid)
-              n_dummy_ = std::distance(first_, last_);
+              is_dummy_ = true;
             }
           };
 
-          auto rh = std::make_shared<pipeline_result_handler>(first, last, state.get_io_executor());
+          auto rh = std::make_shared<pipeline_result_handler>(pl, &results, state.get_io_executor());
           self->result_handlers_.push(rh);
 
           co_await rh->async_wait(deferred_tuple);
@@ -203,19 +244,18 @@ public:
           if (rh->is_waiting())
           {
             rh->dumify();
-            co_return asio::error::operation_aborted;
+            co_return { asio::error::operation_aborted, std::vector<result>{} };
           }
 
           if (rh->is_cancelled())
-            co_return error::connection_failed;
+            co_return { error::connection_failed, std::vector<result>{} };
 
-          co_return {};
+          co_return { error_code{}, std::move(results) };
         },
         socket_),
       token,
       this,
-      first,
-      last);
+      &pl);
   }
 
   auto async_query(std::string query, asio::completion_token_for<void(error_code, result)> auto&& token)
