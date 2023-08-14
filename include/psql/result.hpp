@@ -8,23 +8,23 @@
 
 namespace psql
 {
-class value
+class cell
 {
   const PGresult* pg_result_{};
   int row_{};
   int col_{};
 
 public:
-  value() = default;
+  cell() = default;
 
-  value(const PGresult* pg_result, int row, int col)
+  cell(const PGresult* pg_result, int row, int col)
     : pg_result_{ pg_result }
     , row_{ row }
     , col_{ col }
   {
   }
 
-  const value* operator->() const noexcept
+  const cell* operator->() const noexcept
   {
     return this;
   }
@@ -56,16 +56,16 @@ public:
 };
 
 template<typename T>
-T as(const value& value, const oid_map& omp = empty_omp)
+T as(const cell& cell, const oid_map& omp = empty_omp)
 {
   auto result = T{};
 
   const auto expected_oid = detail::oid_of<T>(omp);
-  if (expected_oid != value.oid())
+  if (expected_oid != cell.oid())
     throw std::runtime_error{ "Mismatched Object Identifiers (OIDs) in received and expected types. Found " +
-                              std::to_string(value.oid()) + " instead of " + std::to_string(expected_oid) };
+                              std::to_string(cell.oid()) + " instead of " + std::to_string(expected_oid) };
 
-  detail::deserialize(omp, { value.data(), value.size() }, result);
+  detail::deserialize(omp, { cell.data(), cell.size() }, result);
 
   return result;
 }
@@ -95,23 +95,23 @@ public:
     return this;
   }
 
-  value operator[](int index) const noexcept
+  cell operator[](int index) const noexcept
   {
-    return value{ pg_result_, row_, index };
+    return cell{ pg_result_, row_, index };
   }
 
-  value at(int index) const
+  cell at(int index) const
   {
     if (static_cast<size_t>(index) < size())
-      return value{ pg_result_, row_, index };
+      return cell{ pg_result_, row_, index };
 
     throw std::out_of_range{ std::string{ "No field at index " } + std::to_string(index) + " exists" };
   }
 
-  value at(const char* name) const
+  cell at(const char* name) const
   {
     if (auto i = PQfnumber(pg_result_, name); i != -1)
-      return value{ pg_result_, row_, i };
+      return cell{ pg_result_, row_, i };
 
     throw std::out_of_range{ std::string{ "No field named " } + name + " exists" };
   }
@@ -133,11 +133,11 @@ auto as(const row& row, const oid_map& omp = empty_omp)
   return as<T>(row.at(0), omp);
 }
 
-template<typename S, typename T, typename... Ts>
+template<typename T1, typename T2, typename... Ts>
 auto as(const row& row, const oid_map& omp = empty_omp)
 {
   return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-    return std::tuple{ as<S>(row.at(0), omp), as<T>(row.at(1), omp), as<Ts>(row.at(Is + 2), omp)... };
+    return std::tuple{ as<T1>(row.at(0), omp), as<T2>(row.at(1), omp), as<Ts>(row.at(Is + 2), omp)... };
   }(std::index_sequence_for<Ts...>{});
 }
 
@@ -148,11 +148,11 @@ class row::const_iterator
   int col_{};
 
 public:
-  using value_type        = value;
+  using value_type        = cell;
   using difference_type   = std::ptrdiff_t;
   using iterator_category = std::bidirectional_iterator_tag;
-  using pointer           = value;
-  using reference         = value;
+  using pointer           = cell;
+  using reference         = cell;
 
   const_iterator() = default;
 
@@ -199,14 +199,14 @@ public:
     return pg_result_ == rhs.pg_result_ && row_ == rhs.row_ && col_ == rhs.col_;
   }
 
-  value operator*() const
+  cell operator*() const
   {
-    return value{ pg_result_, row_, col_ };
+    return cell{ pg_result_, row_, col_ };
   }
 
-  value operator->() const
+  cell operator->() const
   {
-    return value{ pg_result_, row_, col_ };
+    return cell{ pg_result_, row_, col_ };
   }
 };
 
