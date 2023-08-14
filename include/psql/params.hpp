@@ -31,15 +31,14 @@ public:
 
   template<typename... Ts>
   params(Ts&&... args)
-    requires(
-      !((std::is_same_v<oid_map, std::decay_t<Ts>> || std::is_same_v<psql::params, std::decay_t<Ts>>) || ...))
+    requires(!((std::is_same_v<oid_map, std::decay_t<Ts>> || std::is_same_v<psql::params, std::decay_t<Ts>>) || ...))
     : params{ empty_omp, std::forward<Ts>(args)... }
   {
   }
 
   int count() const
   {
-    return types_.size();
+    return static_cast<int>(types_.size());
   }
 
   const Oid* types() const

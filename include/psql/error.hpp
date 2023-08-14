@@ -16,7 +16,11 @@ enum class error
   pq_send_describe_prepared_failed,
   pq_send_describe_portal_failed,
   pq_pipeline_sync_failed,
-  pq_consume_input_failed
+  pq_consume_input_failed,
+  result_status_bad_response,
+  result_status_empty_query,
+  result_status_fatal_error,
+  result_status_unexpected
 };
 
 inline const boost::system::error_category& error_category()
@@ -37,25 +41,33 @@ inline const boost::system::error_category& error_category()
         case error::connection_failed:
           return "Connection to database failed";
         case error::pq_status_failed:
-          return "PQstatus failed, check error message on connection";
+          return "PQstatus failed, check the error message on the connection";
         case error::pq_set_non_blocking_failed:
-          return "PQsetnonblocking failed, check error message on connection";
+          return "PQsetnonblocking failed, check the error message on the connection";
         case error::pq_enter_pipeline_mode_failed:
-          return "PQenterPipelineMode failed, check error message on connection";
+          return "PQenterPipelineMode failed, check the error message on the connection";
         case error::pq_send_query_params_failed:
-          return "PQsendQueryParams failed, check error message on connection";
+          return "PQsendQueryParams failed, check the error message on the connection";
         case error::pq_send_prepare_failed:
-          return "PQsendPrepare failed, check error message on connection";
+          return "PQsendPrepare failed, check the error message on the connection";
         case error::pq_send_query_prepared_failed:
-          return "PQsendQueryPrepared failed, check error message on connection";
+          return "PQsendQueryPrepared failed, check the error message on the connection";
         case error::pq_send_describe_prepared_failed:
-          return "PQsendDescribePrepared failed, check error message on connection";
+          return "PQsendDescribePrepared failed, check the error message on the connection";
         case error::pq_send_describe_portal_failed:
-          return "PQsendDescribePortal failed, check error message on connection";
+          return "PQsendDescribePortal failed, check the error message on the connection";
         case error::pq_pipeline_sync_failed:
-          return "PQpipelineSync failed, check error message on connection";
+          return "PQpipelineSync failed, check the error message on the connection";
         case error::pq_consume_input_failed:
-          return "PQconsumeInput failed, check error message on connection";
+          return "PQconsumeInput failed, check the error message on the connection";
+        case error::result_status_bad_response:
+          return "The server's response was not understood";
+        case error::result_status_empty_query:
+          return "The query sent to the server was empty";
+        case error::result_status_fatal_error:
+          return "Fatal error in query execution, check the error message on the result";
+        case error::result_status_unexpected:
+          return "Unexpected status from query result";
         default:
           return "Unknown error";
       }

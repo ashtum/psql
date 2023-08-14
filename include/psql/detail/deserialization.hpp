@@ -36,7 +36,7 @@ struct deserialize_impl<std::chrono::system_clock::time_point>
 {
   static void apply(const oid_map& omp, std::span<const char> buffer, std::chrono::system_clock::time_point& value)
   {
-    int64_t int_value;
+    int64_t int_value{};
     deserialize(omp, buffer, int_value);
     value = std::chrono::system_clock::time_point{} + std::chrono::microseconds{ int_value + 946684800000000 };
   }

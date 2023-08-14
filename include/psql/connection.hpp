@@ -418,25 +418,16 @@ private:
 
           self->write_cv_.cancel_one();
 
-          class single_query_result_handler : public detail::result_handler
+          struct single_query_result_handler : detail::result_handler
           {
-            result result_;
+            result result;
 
-          public:
-            explicit single_query_result_handler(asio::any_io_executor exec)
-              : result_handler{ std::move(exec) }
-            {
-            }
+            using detail::result_handler::result_handler;
 
-            void handle(result res) override
+            void handle(psql::result r) override
             {
-              result_ = std::move(res);
+              result = std::move(r);
               complete();
-            }
-
-            result release_result()
-            {
-              return std::move(result_);
             }
           };
 
@@ -451,7 +442,21 @@ private:
           if (rh->is_cancelled())
             co_return { error::connection_failed, nullptr };
 
-          co_return { error_code{}, rh->release_result() };
+          switch (PQresultStatus(rh->result.native_handle()))
+          {
+            case PGRES_SINGLE_TUPLE:
+            case PGRES_TUPLES_OK:
+            case PGRES_COMMAND_OK:
+              co_return { error_code{}, std::move(rh->result) };
+            case PGRES_BAD_RESPONSE:
+              co_return { error::result_status_bad_response, std::move(rh->result) };
+            case PGRES_EMPTY_QUERY:
+              co_return { error::result_status_empty_query, std::move(rh->result) };
+            case PGRES_FATAL_ERROR:
+              co_return { error::result_status_fatal_error, std::move(rh->result) };
+            default:
+              co_return { error::result_status_unexpected, std::move(rh->result) };
+          }
         },
         socket_),
       token,
