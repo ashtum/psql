@@ -37,8 +37,8 @@ struct user_defined<Company>
 
 asio::awaitable<void> run_exmaple(psql::connection& conn)
 {
-  co_await conn.async_query("DROP TYPE IF EXISTS employee;", asio::deferred);
   co_await conn.async_query("DROP TYPE IF EXISTS company;", asio::deferred);
+  co_await conn.async_query("DROP TYPE IF EXISTS employee;", asio::deferred);
   co_await conn.async_query("CREATE TYPE employee AS (name TEXT, phone TEXT);", asio::deferred);
   co_await conn.async_query("CREATE TYPE company AS (id INT8, employees employee[]);", asio::deferred);
 

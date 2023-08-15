@@ -9,7 +9,9 @@ enum class error
   connection_failed = 1,
   pq_status_failed,
   pq_set_non_blocking_failed,
+  pq_flush_failed,
   pq_enter_pipeline_mode_failed,
+  pq_exit_pipeline_mode_failed,
   pq_send_query_params_failed,
   pq_send_prepare_failed,
   pq_send_query_prepared_failed,
@@ -44,8 +46,12 @@ inline const boost::system::error_category& error_category()
           return "PQstatus failed, check the error message on the connection";
         case error::pq_set_non_blocking_failed:
           return "PQsetnonblocking failed, check the error message on the connection";
+        case error::pq_flush_failed:
+          return "PQflush failed, check the error message on the connection";
         case error::pq_enter_pipeline_mode_failed:
           return "PQenterPipelineMode failed, check the error message on the connection";
+        case error::pq_exit_pipeline_mode_failed:
+          return "PQexitPipelineMode failed, check the error message on the connection";
         case error::pq_send_query_params_failed:
           return "PQsendQueryParams failed, check the error message on the connection";
         case error::pq_send_prepare_failed:
