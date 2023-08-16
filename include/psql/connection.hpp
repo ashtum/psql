@@ -5,7 +5,6 @@
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
 
-#include <boost/asio/associated_immediate_executor.hpp>
 #include <boost/asio/compose.hpp>
 #include <boost/asio/coroutine.hpp>
 #include <boost/asio/generic/stream_protocol.hpp>
@@ -31,13 +30,10 @@ class connection
 
   std::unique_ptr<PGconn, pgconn_deleter> conn_;
   stream_protocol::socket socket_;
-  asio::steady_timer shared_wait_cv_;
-  bool is_waiting_{ false };
 
 public:
   explicit connection(asio::any_io_executor exec)
     : socket_{ exec }
-    , shared_wait_cv_{ std::move(exec), asio::steady_timer::time_point::max() }
   {
   }
 
@@ -180,27 +176,32 @@ public:
   auto async_receive_notifcation(asio::completion_token_for<void(error_code, notification)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code, notification)>(
-      [this, stored_notification = notification{}, needs_rescheduling = true](auto& self, error_code ec = {}) mutable
+      [this, coro = asio::coroutine{}, stored_notification = notification{}, needs_rescheduling = true](
+        auto& self, error_code ec = {}) mutable
       {
         if (ec)
           return self.complete(ec, {});
 
-        if (stored_notification)
-          return self.complete({}, notification{ std::move(stored_notification) });
-
-        if (!PQconsumeInput(conn_.get()))
-          return self.complete(error::pq_consume_input_failed, {});
-
-        if ((stored_notification = notification{ PQnotifies(conn_.get()) }))
+        BOOST_ASIO_CORO_REENTER(coro)
         {
-          if (needs_rescheduling)
-            return asio::post(std::move(self));
+          for (;;)
+          {
+            if ((stored_notification = notification{ PQnotifies(conn_.get()) }))
+            {
+              if (needs_rescheduling)
+              {
+                BOOST_ASIO_CORO_YIELD asio::post(std::move(self));
+              }
 
-          return self.complete({}, notification{ std::move(stored_notification) });
+              return self.complete({}, notification{ std::move(stored_notification) });
+            }
+
+            needs_rescheduling = false;
+            BOOST_ASIO_CORO_YIELD socket_.async_wait(wait_type::wait_read, std::move(self));
+            if (!PQconsumeInput(conn_.get()))
+              return self.complete(error::pq_consume_input_failed, {});
+          }
         }
-
-        needs_rescheduling = false;
-        async_shared_wait(std::move(self));
       },
       token);
   }
@@ -211,32 +212,6 @@ public:
   }
 
 private:
-  auto async_shared_wait(asio::completion_token_for<void(error_code)> auto&& token)
-  {
-    return asio::async_compose<decltype(token), void(error_code)>(
-      [this, coro = asio::coroutine{}](auto& self, error_code ec = {}) mutable
-      {
-        if (ec && !!self.cancelled())
-          return self.complete(ec);
-
-        BOOST_ASIO_CORO_REENTER(coro)
-        {
-          if (std::exchange(is_waiting_, true))
-          {
-            BOOST_ASIO_CORO_YIELD shared_wait_cv_.async_wait(std::move(self));
-          }
-          else
-          {
-            BOOST_ASIO_CORO_YIELD socket_.async_wait(wait_type::wait_write, std::move(self));
-            shared_wait_cv_.cancel();
-            is_waiting_ = false;
-          }
-          self.complete({});
-        }
-      },
-      token);
-  }
-
   auto async_flush(asio::completion_token_for<void(error_code)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code)>(
@@ -261,24 +236,28 @@ private:
   auto async_receive_result(asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code, result)>(
-      [this, needs_rescheduling = true](auto& self, error_code ec = {}) mutable
+      [this, coro = asio::coroutine{}, needs_rescheduling = true](auto& self, error_code ec = {}) mutable
       {
         if (ec)
           return self.complete(ec, {});
 
-        if (!PQconsumeInput(conn_.get()))
-          return self.complete(error::pq_consume_input_failed, {});
-
-        if (PQisBusy(conn_.get()))
+        BOOST_ASIO_CORO_REENTER(coro)
         {
-          needs_rescheduling = false;
-          return async_shared_wait(std::move(self));
+          while (PQisBusy(conn_.get()))
+          {
+            needs_rescheduling = false;
+            BOOST_ASIO_CORO_YIELD socket_.async_wait(wait_type::wait_read, std::move(self));
+            if (!PQconsumeInput(conn_.get()))
+              return self.complete(error::pq_consume_input_failed, {});
+          }
+
+          if (needs_rescheduling)
+          {
+            BOOST_ASIO_CORO_YIELD asio::post(std::move(self));
+          }
+
+          self.complete({}, result{ PQgetResult(conn_.get()) });
         }
-
-        if (std::exchange(needs_rescheduling, false))
-          return asio::post(std::move(self));
-
-        self.complete({}, result{ PQgetResult(conn_.get()) });
       },
       token);
   }
