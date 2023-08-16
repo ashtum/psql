@@ -31,10 +31,13 @@ class connection
 
   std::unique_ptr<PGconn, pgconn_deleter> conn_;
   stream_protocol::socket socket_;
+  asio::steady_timer shared_wait_cv_;
+  bool is_waiting_{ false };
 
 public:
   explicit connection(asio::any_io_executor exec)
     : socket_{ exec }
+    , shared_wait_cv_{ std::move(exec), asio::steady_timer::time_point::max() }
   {
   }
 
@@ -197,7 +200,7 @@ public:
         }
 
         needs_rescheduling = false;
-        socket_.async_wait(wait_type::wait_read, std::move(self));
+        async_shared_wait(std::move(self));
       },
       token);
   }
@@ -208,6 +211,32 @@ public:
   }
 
 private:
+  auto async_shared_wait(asio::completion_token_for<void(error_code)> auto&& token)
+  {
+    return asio::async_compose<decltype(token), void(error_code)>(
+      [this, coro = asio::coroutine{}](auto& self, error_code ec = {}) mutable
+      {
+        if (ec && !!self.cancelled())
+          return self.complete(ec);
+
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          if (std::exchange(is_waiting_, true))
+          {
+            BOOST_ASIO_CORO_YIELD shared_wait_cv_.async_wait(std::move(self));
+          }
+          else
+          {
+            BOOST_ASIO_CORO_YIELD socket_.async_wait(wait_type::wait_write, std::move(self));
+            shared_wait_cv_.cancel();
+            is_waiting_ = false;
+          }
+          self.complete({});
+        }
+      },
+      token);
+  }
+
   auto async_flush(asio::completion_token_for<void(error_code)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code)>(
@@ -224,7 +253,7 @@ private:
         if (ret == 1)
           return socket_.async_wait(wait_type::wait_write, std::move(self));
 
-        return self.complete(error::pq_flush_failed);
+        self.complete(error::pq_flush_failed);
       },
       token);
   }
@@ -243,13 +272,13 @@ private:
         if (PQisBusy(conn_.get()))
         {
           needs_rescheduling = false;
-          return socket_.async_wait(wait_type::wait_read, std::move(self));
+          return async_shared_wait(std::move(self));
         }
 
         if (std::exchange(needs_rescheduling, false))
           return asio::post(std::move(self));
 
-        return self.complete({}, result{ PQgetResult(conn_.get()) });
+        self.complete({}, result{ PQgetResult(conn_.get()) });
       },
       token);
   }
@@ -353,7 +382,7 @@ private:
           if (!PQexitPipelineMode(conn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
-          return self.complete(result_status_to_error_code(results.back()), std::move(results));
+          self.complete(result_status_to_error_code(results.back()), std::move(results));
         }
       },
       token);
