@@ -4,8 +4,6 @@
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
 
-#include <boost/asio.hpp>
-#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/associated_immediate_executor.hpp>
 #include <boost/asio/compose.hpp>
 #include <boost/asio/coroutine.hpp>

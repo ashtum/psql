@@ -1,6 +1,7 @@
 #include <psql/connection.hpp>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/deferred.hpp>
 
 #include <iostream>
 

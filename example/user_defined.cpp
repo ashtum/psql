@@ -3,6 +3,7 @@
 #include <psql/query_oids.hpp>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/deferred.hpp>
 
 #include <iostream>
 
