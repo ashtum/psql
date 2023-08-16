@@ -202,20 +202,25 @@ private:
       token);
   }
 
-  auto async_wait_for_result(asio::completion_token_for<void(error_code)> auto&& token)
+  auto async_receive_result(asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return asio::async_compose<decltype(token), void(error_code)>(
-      [this](auto& self, error_code ec = {})
+    return asio::async_compose<decltype(token), void(error_code, result)>(
+      [this, needs_post = true](auto& self, error_code ec = {}) mutable
       {
         if (ec)
-          return self.complete(ec);
+          return self.complete(ec, {});
 
         if (!PQconsumeInput(conn_.get()))
-          return self.complete(error::pq_consume_input_failed);
+          return self.complete(error::pq_consume_input_failed, {});
 
         if (!PQisBusy(conn_.get()))
-          return self.complete({});
+        {
+          if (std::exchange(needs_post, false))
+            return asio::post(std::move(self));
+          return self.complete({}, PQgetResult(conn_.get()));
+        }
 
+        needs_post = false;
         socket_.async_wait(wait_type::wait_read, std::move(self));
       },
       token);
@@ -224,11 +229,13 @@ private:
   auto async_single_result_impl(auto send_fn, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code, result)>(
-      [this, coro = asio::coroutine{}, result = result{}, send_fn = std::move(send_fn)](
-        auto& self, error_code ec = {}) mutable
+      [this, coro = asio::coroutine{}, stored_result = result{}, send_fn = std::move(send_fn)](
+        auto& self, error_code ec = {}, result result = {}) mutable
       {
         if (ec)
           return self.complete(ec, nullptr);
+
+        void(this); // supress false warning "lambda capture 'this' is not used"
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
@@ -236,11 +243,12 @@ private:
             return self.complete(ec, nullptr);
 
           BOOST_ASIO_CORO_YIELD async_flush(std::move(self));
-          BOOST_ASIO_CORO_YIELD async_wait_for_result(std::move(self));
-          result = PQgetResult(conn_.get());
-          BOOST_ASIO_CORO_YIELD async_wait_for_result(std::move(self));
-          PQgetResult(conn_.get());
-          self.complete(ec, std::move(result));
+
+          BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
+          stored_result = std::move(result);
+
+          BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
+          self.complete(result_status_to_error_code(stored_result), std::move(stored_result));
         }
       },
       token);
@@ -255,7 +263,7 @@ private:
        coro    = asio::coroutine{},
        results = std::vector<result>{ pl.operations.size() },
        index   = size_t{},
-       pl      = &pl](auto& self, error_code ec = {}) mutable
+       pl      = &pl](auto& self, error_code ec = {}, result result = {}) mutable
       {
         if (ec)
           return self.complete(ec, {});
@@ -306,28 +314,24 @@ private:
 
           while (index < results.size())
           {
-            BOOST_ASIO_CORO_YIELD async_wait_for_result(std::move(self));
-            results[index] = psql::result{ PQgetResult(conn_.get()) };
-            BOOST_ASIO_CORO_YIELD async_wait_for_result(std::move(self));
-            PQgetResult(conn_.get());
+            BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
+            results[index] = std::move(result);
+            BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
             index++;
           }
 
-          BOOST_ASIO_CORO_YIELD async_wait_for_result(std::move(self));
-          PQgetResult(conn_.get());
-          BOOST_ASIO_CORO_YIELD async_wait_for_result(std::move(self));
-          PQgetResult(conn_.get());
+          BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
 
           if (!PQexitPipelineMode(conn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
-          return self.complete({}, std::move(results));
+          return self.complete(result_status_to_error_code(results.back()), std::move(results));
         }
       },
       token);
   }
 
-  static error_code check_result_status(const result& result) noexcept
+  static error_code result_status_to_error_code(const result& result) noexcept
   {
     switch (PQresultStatus(result.native_handle()))
     {
@@ -341,6 +345,8 @@ private:
         return error::result_status_empty_query;
       case PGRES_FATAL_ERROR:
         return error::result_status_fatal_error;
+      case PGRES_PIPELINE_ABORTED:
+        return error::result_status_pipeline_aborted;
       default:
         return error::result_status_unexpected;
     }

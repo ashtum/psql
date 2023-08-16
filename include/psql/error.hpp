@@ -22,6 +22,7 @@ enum class error
   result_status_bad_response,
   result_status_empty_query,
   result_status_fatal_error,
+  result_status_pipeline_aborted,
   result_status_unexpected
 };
 
@@ -72,6 +73,8 @@ inline const boost::system::error_category& error_category()
           return "The query sent to the server was empty";
         case error::result_status_fatal_error:
           return "Fatal error in query execution, check the error message on the result";
+        case error::result_status_pipeline_aborted:
+          return "Fatal error in pipeline execution, check the error message on the result";
         case error::result_status_unexpected:
           return "Unexpected status from query result";
         default:
