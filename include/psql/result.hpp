@@ -237,7 +237,7 @@ public:
 
   result() = default;
 
-  result(PGresult* pg_result)
+  explicit result(PGresult* pg_result)
     : pg_result_{ pg_result }
   {
   }

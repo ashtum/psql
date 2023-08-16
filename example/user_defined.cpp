@@ -1,5 +1,4 @@
 #include <psql/connection.hpp>
-#include <psql/detail/deserialization.hpp>
 #include <psql/query_oids.hpp>
 
 #include <boost/asio/awaitable.hpp>

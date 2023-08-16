@@ -1,6 +1,7 @@
 #pragma once
 
 #include <psql/error.hpp>
+#include <psql/notification.hpp>
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
 
@@ -173,6 +174,34 @@ public:
       std::forward<decltype(token)>(token));
   }
 
+  auto async_receive_notifcation(asio::completion_token_for<void(error_code, notification)> auto&& token)
+  {
+    return asio::async_compose<decltype(token), void(error_code, notification)>(
+      [this, stored_notification = notification{}, needs_rescheduling = true](auto& self, error_code ec = {}) mutable
+      {
+        if (ec)
+          return self.complete(ec, {});
+
+        if (stored_notification)
+          return self.complete({}, notification{ std::move(stored_notification) });
+
+        if (!PQconsumeInput(conn_.get()))
+          return self.complete(error::pq_consume_input_failed, {});
+
+        if ((stored_notification = notification{ PQnotifies(conn_.get()) }))
+        {
+          if (needs_rescheduling)
+            return asio::post(std::move(self));
+
+          return self.complete({}, notification{ std::move(stored_notification) });
+        }
+
+        needs_rescheduling = false;
+        socket_.async_wait(wait_type::wait_read, std::move(self));
+      },
+      token);
+  }
+
   std::string_view error_message() const noexcept
   {
     return PQerrorMessage(conn_.get());
@@ -203,7 +232,7 @@ private:
   auto async_receive_result(asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code, result)>(
-      [this, needs_post = true](auto& self, error_code ec = {}) mutable
+      [this, needs_rescheduling = true](auto& self, error_code ec = {}) mutable
       {
         if (ec)
           return self.complete(ec, {});
@@ -211,15 +240,16 @@ private:
         if (!PQconsumeInput(conn_.get()))
           return self.complete(error::pq_consume_input_failed, {});
 
-        if (!PQisBusy(conn_.get()))
+        if (PQisBusy(conn_.get()))
         {
-          if (std::exchange(needs_post, false))
-            return asio::post(std::move(self));
-          return self.complete({}, PQgetResult(conn_.get()));
+          needs_rescheduling = false;
+          return socket_.async_wait(wait_type::wait_read, std::move(self));
         }
 
-        needs_post = false;
-        socket_.async_wait(wait_type::wait_read, std::move(self));
+        if (std::exchange(needs_rescheduling, false))
+          return asio::post(std::move(self));
+
+        return self.complete({}, result{ PQgetResult(conn_.get()) });
       },
       token);
   }
@@ -231,14 +261,14 @@ private:
         auto& self, error_code ec = {}, result result = {}) mutable
       {
         if (ec)
-          return self.complete(ec, nullptr);
+          return self.complete(ec, {});
 
         void(this); // supress false warning "lambda capture 'this' is not used"
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
           if (auto ec = send_fn())
-            return self.complete(ec, nullptr);
+            return self.complete(ec, {});
 
           BOOST_ASIO_CORO_YIELD async_flush(std::move(self));
 
