@@ -5,6 +5,7 @@
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
 
+#include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/compose.hpp>
 #include <boost/asio/coroutine.hpp>
 #include <boost/asio/generic/stream_protocol.hpp>
@@ -30,6 +31,7 @@ class connection
 
   std::unique_ptr<PGconn, pgconn_deleter> conn_;
   stream_protocol::socket socket_;
+  asio::cancellation_signal notification_cs_;
 
 public:
   explicit connection(asio::any_io_executor exec)
@@ -85,7 +87,8 @@ public:
 
         return self.complete({});
       },
-      token);
+      token,
+      socket_);
   }
 
   auto async_exec_pipeline(pipeline& pl, asio::completion_token_for<void(error_code, std::vector<result>)> auto&& token)
@@ -179,7 +182,7 @@ public:
       [this, coro = asio::coroutine{}, stored_notification = notification{}, needs_rescheduling = true](
         auto& self, error_code ec = {}) mutable
       {
-        if (ec)
+        if (ec && !(ec == asio::error::operation_aborted && !self.cancelled()))
           return self.complete(ec, {});
 
         BOOST_ASIO_CORO_REENTER(coro)
@@ -193,17 +196,21 @@ public:
                 BOOST_ASIO_CORO_YIELD asio::post(std::move(self));
               }
 
-              return self.complete({}, notification{ std::move(stored_notification) });
+              return self.complete({}, std::move(stored_notification));
             }
 
-            needs_rescheduling = false;
-            BOOST_ASIO_CORO_YIELD socket_.async_wait(wait_type::wait_read, std::move(self));
+            asio::get_associated_cancellation_slot(self).assign([this](auto c) { notification_cs_.emit(c); });
+
+            BOOST_ASIO_CORO_YIELD socket_.async_wait(
+              wait_type::wait_read, asio::bind_cancellation_slot(notification_cs_.slot(), std::move(self)));
+
             if (!PQconsumeInput(conn_.get()))
               return self.complete(error::pq_consume_input_failed, {});
           }
         }
       },
-      token);
+      token,
+      socket_);
   }
 
   std::string_view error_message() const noexcept
@@ -230,7 +237,8 @@ private:
 
         self.complete(error::pq_flush_failed);
       },
-      token);
+      token,
+      socket_);
   }
 
   auto async_receive_result(asio::completion_token_for<void(error_code, result)> auto&& token)
@@ -259,7 +267,8 @@ private:
           self.complete({}, result{ PQgetResult(conn_.get()) });
         }
       },
-      token);
+      token,
+      socket_);
   }
 
   auto async_single_result_impl(auto send_fn, asio::completion_token_for<void(error_code, result)> auto&& token)
@@ -284,10 +293,13 @@ private:
           stored_result = std::move(result);
 
           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
+
           self.complete(result_status_to_error_code(stored_result), std::move(stored_result));
+          notification_cs_.emit(asio::cancellation_type::terminal);
         }
       },
-      token);
+      token,
+      socket_);
   }
 
   auto async_exec_pipeline_impl(
@@ -362,9 +374,11 @@ private:
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
           self.complete(result_status_to_error_code(results.back()), std::move(results));
+          notification_cs_.emit(asio::cancellation_type::terminal);
         }
       },
-      token);
+      token,
+      socket_);
   }
 
   static error_code result_status_to_error_code(const result& result) noexcept
