@@ -294,7 +294,8 @@ private:
 
           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
 
-          self.complete(result_status_to_error_code(stored_result), std::move(stored_result));
+          auto result_ec = result_status_to_error_code(stored_result);
+          self.complete(result_ec, std::move(stored_result));
           notification_cs_.emit(asio::cancellation_type::terminal);
         }
       },
@@ -373,7 +374,8 @@ private:
           if (!PQexitPipelineMode(conn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
-          self.complete(result_status_to_error_code(results.back()), std::move(results));
+          auto result_ec = result_status_to_error_code(results.back());
+          self.complete(result_ec, std::move(results));
           notification_cs_.emit(asio::cancellation_type::terminal);
         }
       },

@@ -18,10 +18,10 @@ protected:
 
   struct operation
   {
-    type type;
+    pipeline::type type;
     std::string stmt_name;
     std::string query;
-    params params;
+    psql::params params;
   };
 
   std::vector<operation> operations;
