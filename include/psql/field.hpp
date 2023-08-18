@@ -6,23 +6,23 @@
 
 namespace psql
 {
-class cell
+class field
 {
   const PGresult* pg_result_{};
   int row_{};
   int col_{};
 
 public:
-  cell() = default;
+  field() = default;
 
-  cell(const PGresult* pg_result, int row, int col)
+  field(const PGresult* pg_result, int row, int col)
     : pg_result_{ pg_result }
     , row_{ row }
     , col_{ col }
   {
   }
 
-  const cell* operator->() const noexcept
+  const field* operator->() const noexcept
   {
     return this;
   }
@@ -54,16 +54,16 @@ public:
 };
 
 template<typename T>
-T as(const cell& cell, const oid_map& omp = empty_omp)
+T as(const field& field, const oid_map& omp = empty_omp)
 {
   auto result = T{};
 
   const auto expected_oid = detail::oid_of<T>(omp);
-  if (expected_oid != cell.oid())
+  if (expected_oid != field.oid())
     throw std::runtime_error{ "Mismatched Object Identifiers (OIDs) in received and expected types. Found " +
-                              std::to_string(cell.oid()) + " instead of " + std::to_string(expected_oid) };
+                              std::to_string(field.oid()) + " instead of " + std::to_string(expected_oid) };
 
-  detail::deserialize(omp, { cell.data(), cell.size() }, result);
+  detail::deserialize(omp, { field.data(), field.size() }, result);
 
   return result;
 }

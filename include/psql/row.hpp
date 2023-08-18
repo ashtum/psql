@@ -29,23 +29,23 @@ public:
     return this;
   }
 
-  cell operator[](int index) const noexcept
+  field operator[](int index) const noexcept
   {
-    return cell{ pg_result_, row_, index };
+    return field{ pg_result_, row_, index };
   }
 
-  cell at(int index) const
+  field at(int index) const
   {
     if (static_cast<size_t>(index) < size())
-      return cell{ pg_result_, row_, index };
+      return field{ pg_result_, row_, index };
 
     throw std::out_of_range{ std::string{ "No field at index " } + std::to_string(index) + " exists" };
   }
 
-  cell at(const char* name) const
+  field at(const char* name) const
   {
     if (auto i = PQfnumber(pg_result_, name); i != -1)
-      return cell{ pg_result_, row_, i };
+      return field{ pg_result_, row_, i };
 
     throw std::out_of_range{ std::string{ "No field named " } + name + " exists" };
   }
@@ -82,11 +82,11 @@ class row::const_iterator
   int col_{};
 
 public:
-  using value_type        = cell;
+  using value_type        = field;
   using difference_type   = std::ptrdiff_t;
   using iterator_category = std::bidirectional_iterator_tag;
-  using pointer           = cell;
-  using reference         = cell;
+  using pointer           = field;
+  using reference         = field;
 
   const_iterator() = default;
 
@@ -133,14 +133,14 @@ public:
     return pg_result_ == rhs.pg_result_ && row_ == rhs.row_ && col_ == rhs.col_;
   }
 
-  cell operator*() const
+  field operator*() const
   {
-    return cell{ pg_result_, row_, col_ };
+    return field{ pg_result_, row_, col_ };
   }
 
-  cell operator->() const
+  field operator->() const
   {
-    return cell{ pg_result_, row_, col_ };
+    return field{ pg_result_, row_, col_ };
   }
 };
 
