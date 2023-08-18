@@ -8,6 +8,7 @@
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/compose.hpp>
 #include <boost/asio/coroutine.hpp>
+#include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/generic/stream_protocol.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
@@ -103,7 +104,7 @@ public:
 
   auto async_query(std::string query, params params, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return async_single_result_impl(
+    return async_single_result_query_impl(
       [this, query = std::move(query), params = std::move(params)]() -> error_code
       {
         if (!PQsendQueryParams(
@@ -126,7 +127,7 @@ public:
     std::string query,
     asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return async_single_result_impl(
+    return async_single_result_query_impl(
       [this, query = std::move(query), stmt_name = std::move(stmt_name)]() -> error_code
       {
         if (!PQsendPrepare(conn_.get(), stmt_name.data(), query.data(), 0, nullptr))
@@ -141,7 +142,7 @@ public:
     params params,
     asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return async_single_result_impl(
+    return async_single_result_query_impl(
       [this, stmt_name = std::move(stmt_name), params = std::move(params)]() -> error_code
       {
         if (!PQsendQueryPrepared(
@@ -154,7 +155,7 @@ public:
 
   auto async_describe_prepared(std::string stmt_name, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return async_single_result_impl(
+    return async_single_result_query_impl(
       [this, stmt_name = std::move(stmt_name)]() -> error_code
       {
         if (!PQsendDescribePrepared(conn_.get(), stmt_name.data()))
@@ -166,7 +167,7 @@ public:
 
   auto async_describe_portal(std::string portal_name, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
-    return async_single_result_impl(
+    return async_single_result_query_impl(
       [this, portal_name = std::move(portal_name)]() -> error_code
       {
         if (!PQsendDescribePortal(conn_.get(), portal_name.data()))
@@ -222,20 +223,34 @@ private:
   auto async_flush(asio::completion_token_for<void(error_code)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code)>(
-      [this](auto& self, error_code ec = {})
+      [this](auto& self, std::array<std::size_t, 2> order = {}, error_code ec1 = {}, error_code ec2 = {})
       {
-        if (ec)
-          return self.complete(ec);
+        if (order[0])
+        {
+          if (ec2)
+            return self.complete(ec2);
 
-        int ret = PQflush(conn_.get());
+          if (!PQconsumeInput(conn_.get()))
+            return self.complete(error::pq_consume_input_failed);
+        }
+        else
+        {
+          if (ec1)
+            return self.complete(ec1);
 
-        if (ret == 0)
-          return self.complete({});
+          int ret = PQflush(conn_.get());
 
-        if (ret == 1)
-          return socket_.async_wait(wait_type::wait_write, std::move(self));
+          if (ret == -1)
+            return self.complete(error::pq_flush_failed);
 
-        self.complete(error::pq_flush_failed);
+          if (ret == 0)
+            return self.complete({});
+        }
+
+        return asio::experimental::make_parallel_group(
+                 [this](auto token) { return socket_.async_wait(wait_type::wait_write, token); },
+                 [this](auto token) { return socket_.async_wait(wait_type::wait_read, token); })
+          .async_wait(asio::experimental::wait_for_one{}, std::move(self));
       },
       token,
       socket_);
@@ -271,7 +286,7 @@ private:
       socket_);
   }
 
-  auto async_single_result_impl(auto send_fn, asio::completion_token_for<void(error_code, result)> auto&& token)
+  auto async_single_result_query_impl(auto send_fn, asio::completion_token_for<void(error_code, result)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code, result)>(
       [this, coro = asio::coroutine{}, stored_result = result{}, send_fn = std::move(send_fn)](
