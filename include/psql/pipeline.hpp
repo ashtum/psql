@@ -1,41 +1,56 @@
 #pragma once
 
+#include <psql/error.hpp>
 #include <psql/params.hpp>
+
+#include <boost/system/system_error.hpp>
+
+#include <libpq-fe.h>
 
 namespace psql
 {
-class connection;
-
 class pipeline
 {
-protected:
-  enum class type
-  {
-    query,
-    query_prepared
-  };
-
-  struct operation
-  {
-    pipeline::type type;
-    std::string stmt_name;
-    std::string query;
-    psql::params params;
-  };
-
-  std::vector<operation> operations;
-
-  friend connection;
+  PGconn* pgconn_;
+  size_t index_{};
 
 public:
-  void enque_query(std::string query, params params = {})
+  pipeline(PGconn* pgconn)
+    : pgconn_{ pgconn }
   {
-    operations.push_back({ type::query, {}, std::move(query), std::move(params) });
   }
 
-  void enque_query_prepared(std::string stmt_name, std::string query, params params = {})
+  pipeline(const pipeline&) = delete;
+  pipeline(pipeline&&)      = delete;
+
+  size_t push_query(std::string query, params params = {})
   {
-    operations.push_back({ type::query_prepared, std::move(stmt_name), std::move(query), std::move(params) });
+    if (!PQsendQueryParams(
+          pgconn_,
+          query.data(),
+          params.count(),
+          params.types(),
+          params.values(),
+          params.lengths(),
+          params.formats(),
+          1))
+      throw boost::system::system_error{ error::pq_send_query_params_failed };
+
+    return index_++;
+  }
+
+  size_t push_query_prepared(std::string stmt_name, params params = {})
+  {
+    if (!PQsendQueryPrepared(
+          pgconn_, stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
+      throw boost::system::system_error{ error::pq_send_query_prepared_failed };
+
+    return index_++;
+  }
+
+  size_t size() const noexcept
+  {
+    return index_;
   }
 };
 } // namespace psql

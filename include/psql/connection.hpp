@@ -93,15 +93,16 @@ public:
   }
 
   auto async_exec_pipeline(
-    const pipeline& pl,
+    auto operation,
     asio::completion_token_for<void(error_code, std::vector<result>)> auto&& token)
   {
     return asio::async_compose<decltype(token), void(error_code, std::vector<result>)>(
       [this,
-       coro    = asio::coroutine{},
-       results = std::vector<result>{ pl.operations.size() },
-       index   = size_t{},
-       pl      = &pl](auto& self, error_code ec = {}, result result = {}) mutable
+       coro      = asio::coroutine{},
+       results   = std::vector<result>{},
+      thrown = false,
+       index     = size_t{},
+       operation = std::move(operation)](auto& self, error_code ec = {}, result result = {}) mutable
       {
         if (ec)
           return self.complete(ec, {});
@@ -111,33 +112,18 @@ public:
           if (!PQenterPipelineMode(conn_.get()))
             return self.complete(error::pq_enter_pipeline_mode_failed, {});
 
-          for (const auto& op : pl->operations)
           {
-            if (op.type == pipeline::type::query)
+            auto pipeline = psql::pipeline{ conn_.get() };
+            try
             {
-              if (!PQsendQueryParams(
-                    conn_.get(),
-                    op.query.data(),
-                    op.params.count(),
-                    op.params.types(),
-                    op.params.values(),
-                    op.params.lengths(),
-                    op.params.formats(),
-                    1))
-                return self.complete(error::pq_send_query_params_failed, {});
+              operation(pipeline);
             }
-            else
+            catch (...)
             {
-              if (!PQsendQueryPrepared(
-                    conn_.get(),
-                    op.stmt_name.data(),
-                    op.params.count(),
-                    op.params.values(),
-                    op.params.lengths(),
-                    op.params.formats(),
-                    1))
-                return self.complete(error::pq_send_query_prepared_failed, {});
+              thrown = true;
+              pipeline.push_query("ROLLBACK;");
             }
+            results.resize(pipeline.size());
           }
 
           if (!PQpipelineSync(conn_.get()))
@@ -160,8 +146,12 @@ public:
           if (!PQexitPipelineMode(conn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
-          auto result_ec = result_status_to_error_code(results.back());
+          if (thrown)
+            return self.complete(error::exception_in_pipeline_operation, {});
+
+          auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
           self.complete(result_ec, std::move(results));
+
           notification_cs_.emit(asio::cancellation_type::terminal);
         }
       },

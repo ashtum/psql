@@ -23,7 +23,8 @@ enum class error
   result_status_empty_query,
   result_status_fatal_error,
   result_status_pipeline_aborted,
-  result_status_unexpected
+  result_status_unexpected,
+  exception_in_pipeline_operation,
 };
 
 inline const boost::system::error_category& error_category()
@@ -77,6 +78,8 @@ inline const boost::system::error_category& error_category()
           return "Fatal error in pipeline execution, check the error message on the result";
         case error::result_status_unexpected:
           return "Unexpected status from query result";
+        case error::exception_in_pipeline_operation:
+          return "An exception occurred while executing the pipeline operation";
         default:
           return "Unknown error";
       }

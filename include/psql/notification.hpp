@@ -45,7 +45,7 @@ public:
     if (pg_notify_)
       return pg_notify_->relname;
 
-    return std::string_view{};
+    return {};
   }
 
   std::string_view payload() const noexcept
@@ -53,7 +53,7 @@ public:
     if (pg_notify_)
       return pg_notify_->extra;
 
-    return std::string_view{};
+    return {};
   }
 };
 } // namespace psql
