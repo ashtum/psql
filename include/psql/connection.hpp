@@ -200,7 +200,8 @@ public:
               return self.complete({}, std::move(stored_notification));
             }
 
-            asio::get_associated_cancellation_slot(self).assign([this](auto c) { notification_cs_.emit(c); });
+            if (asio::get_associated_cancellation_slot(self).is_connected())
+              asio::get_associated_cancellation_slot(self).assign([this](auto c) { notification_cs_.emit(c); });
 
             BOOST_ASIO_CORO_YIELD socket_.async_wait(
               wait_type::wait_read, asio::bind_cancellation_slot(notification_cs_.slot(), std::move(self)));
