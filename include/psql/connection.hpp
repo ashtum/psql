@@ -9,14 +9,15 @@
 #include <boost/asio/compose.hpp>
 #include <boost/asio/coroutine.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
-#include <boost/asio/generic/stream_protocol.hpp>
-#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/post.hpp>
 
 namespace psql
 {
 namespace asio = boost::asio;
 
-class connection
+template<typename Executor = asio::any_io_executor>
+class basic_connection
 {
   struct pgconn_deleter
   {
@@ -26,35 +27,37 @@ class connection
     }
   };
 
-  using stream_protocol = asio::generic::stream_protocol;
-  using wait_type       = stream_protocol::socket::wait_type;
-  using error_code      = boost::system::error_code;
+  using socket_type = asio::posix::basic_stream_descriptor<Executor>;
+  using wait_type   = typename socket_type::wait_type;
+  using error_code  = boost::system::error_code;
 
   std::unique_ptr<PGconn, pgconn_deleter> conn_;
-  stream_protocol::socket socket_;
+  socket_type socket_;
   asio::cancellation_signal notification_cs_;
 
 public:
-  explicit connection(asio::any_io_executor exec)
-    : socket_{ exec }
+  using executor_type = Executor;
+
+  explicit basic_connection(Executor exec)
+    : socket_{ std::move(exec) }
   {
   }
 
-  ~connection()
+  template<typename OtherExecutor>
+  struct rebind_executor
   {
-    // PQfinish handles the closing of the socket.
-    if (conn_)
-      socket_.release();
-  }
+    using other = basic_connection<OtherExecutor>;
+  };
 
-  auto get_executor() noexcept
+  executor_type get_executor() noexcept
   {
     return socket_.get_executor();
   }
 
-  auto async_connect(std::string conninfo, asio::completion_token_for<void(error_code)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_connect(std::string conninfo, CompletionToken&& token = CompletionToken{})
   {
-    return asio::async_compose<decltype(token), void(error_code)>(
+    return asio::async_compose<CompletionToken, void(error_code)>(
       [this, conninfo = std::move(conninfo), init = true](auto& self, error_code ec = {}) mutable
       {
         if (ec)
@@ -63,7 +66,7 @@ public:
         if (std::exchange(init, false))
         {
           conn_.reset(PQconnectStart(conninfo.data()));
-          socket_.assign(asio::ip::tcp::v4(), PQsocket(conn_.get()));
+          socket_.assign(PQsocket(conn_.get()));
 
           if (PQstatus(conn_.get()) == CONNECTION_BAD)
             return self.complete(error::pq_status_failed);
@@ -92,15 +95,14 @@ public:
       socket_);
   }
 
-  auto async_exec_pipeline(
-    auto operation,
-    asio::completion_token_for<void(error_code, std::vector<result>)> auto&& token)
+  template<typename Operation, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_exec_pipeline(Operation&& operation, CompletionToken&& token = CompletionToken{})
   {
-    return asio::async_compose<decltype(token), void(error_code, std::vector<result>)>(
+    return asio::async_compose<CompletionToken, void(error_code, std::vector<result>)>(
       [this,
        coro      = asio::coroutine{},
        results   = std::vector<result>{},
-      thrown = false,
+       thrown    = false,
        index     = size_t{},
        operation = std::move(operation)](auto& self, error_code ec = {}, result result = {}) mutable
       {
@@ -159,12 +161,14 @@ public:
       socket_);
   }
 
-  auto async_query(std::string query, asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query(std::string query, CompletionToken&& token = CompletionToken{})
   {
-    return async_query(std::move(query), {}, std::forward<decltype(token)>(token));
+    return async_query(std::move(query), {}, std::forward<CompletionToken>(token));
   }
 
-  auto async_query(std::string query, params params, asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query(std::string query, params params, CompletionToken&& token = CompletionToken{})
   {
     return async_generic_single_result_query(
       [this, query = std::move(query), params = std::move(params)]() -> error_code
@@ -181,13 +185,11 @@ public:
           return error::pq_send_query_params_failed;
         return {};
       },
-      std::forward<decltype(token)>(token));
+      std::forward<CompletionToken>(token));
   }
 
-  auto async_prepare(
-    std::string stmt_name,
-    std::string query,
-    asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_prepare(std::string stmt_name, std::string query, CompletionToken&& token = CompletionToken{})
   {
     return async_generic_single_result_query(
       [this, query = std::move(query), stmt_name = std::move(stmt_name)]() -> error_code
@@ -196,13 +198,11 @@ public:
           return error::pq_send_prepare_failed;
         return {};
       },
-      std::forward<decltype(token)>(token));
+      std::forward<CompletionToken>(token));
   }
 
-  auto async_query_prepared(
-    std::string stmt_name,
-    params params,
-    asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query_prepared(std::string stmt_name, params params, CompletionToken&& token = CompletionToken{})
   {
     return async_generic_single_result_query(
       [this, stmt_name = std::move(stmt_name), params = std::move(params)]() -> error_code
@@ -215,7 +215,8 @@ public:
       token);
   }
 
-  auto async_describe_prepared(std::string stmt_name, asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_describe_prepared(std::string stmt_name, CompletionToken&& token = CompletionToken{})
   {
     return async_generic_single_result_query(
       [this, stmt_name = std::move(stmt_name)]() -> error_code
@@ -224,10 +225,11 @@ public:
           return error::pq_send_describe_prepared_failed;
         return {};
       },
-      std::forward<decltype(token)>(token));
+      std::forward<CompletionToken>(token));
   }
 
-  auto async_describe_portal(std::string portal_name, asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_describe_portal(std::string portal_name, CompletionToken&& token = CompletionToken{})
   {
     return async_generic_single_result_query(
       [this, portal_name = std::move(portal_name)]() -> error_code
@@ -236,12 +238,13 @@ public:
           return error::pq_send_describe_portal_failed;
         return {};
       },
-      std::forward<decltype(token)>(token));
+      std::forward<CompletionToken>(token));
   }
 
-  auto async_receive_notifcation(asio::completion_token_for<void(error_code, notification)> auto&& token)
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_receive_notifcation(CompletionToken&& token = CompletionToken{})
   {
-    return asio::async_compose<decltype(token), void(error_code, notification)>(
+    return asio::async_compose<CompletionToken, void(error_code, notification)>(
       [this, coro = asio::coroutine{}, stored_notification = notification{}, needs_rescheduling = true](
         auto& self, error_code ec = {}) mutable
       {
@@ -282,10 +285,18 @@ public:
     return PQerrorMessage(conn_.get());
   }
 
-private:
-  auto async_flush(asio::completion_token_for<void(error_code)> auto&& token)
+  ~basic_connection()
   {
-    return asio::async_compose<decltype(token), void(error_code)>(
+    // PQfinish handles the closing of the socket.
+    if (conn_)
+      socket_.release();
+  }
+
+private:
+  template<typename CompletionToken>
+  auto async_flush(CompletionToken&& token)
+  {
+    return asio::async_compose<CompletionToken, void(error_code)>(
       [this](auto& self, std::array<std::size_t, 2> order = {}, error_code ec1 = {}, error_code ec2 = {})
       {
         if (order[0])
@@ -319,9 +330,10 @@ private:
       socket_);
   }
 
-  auto async_receive_result(asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename CompletionToken>
+  auto async_receive_result(CompletionToken&& token)
   {
-    return asio::async_compose<decltype(token), void(error_code, result)>(
+    return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, needs_rescheduling = true](auto& self, error_code ec = {}) mutable
       {
         if (ec)
@@ -349,11 +361,10 @@ private:
       socket_);
   }
 
-  auto async_generic_single_result_query(
-    auto send_fn,
-    asio::completion_token_for<void(error_code, result)> auto&& token)
+  template<typename F, typename CompletionToken>
+  auto async_generic_single_result_query(F&& send_fn, CompletionToken&& token)
   {
-    return asio::async_compose<decltype(token), void(error_code, result)>(
+    return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, stored_result = result{}, send_fn = std::move(send_fn)](
         auto& self, error_code ec = {}, result result = {}) mutable
       {
@@ -405,4 +416,6 @@ private:
     }
   }
 };
+
+using connection = basic_connection<>;
 } // namespace psql

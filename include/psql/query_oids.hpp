@@ -1,13 +1,16 @@
+#pragma once
+
 #include <psql/connection.hpp>
 
 namespace psql
 {
-auto async_query_oids(
-  connection& conn,
-  oid_map& omp,
-  asio::completion_token_for<void(boost::system::error_code)> auto&& token)
+
+template<
+  typename Connection,
+  typename CompletionToken = asio::default_completion_token_t<typename Connection::executor_type>>
+auto async_query_oids(Connection& conn, oid_map& omp, CompletionToken&& token = CompletionToken{})
 {
-  return asio::async_compose<decltype(token), void(boost::system::error_code)>(
+  return asio::async_compose<CompletionToken, void(boost::system::error_code)>(
     [coro = asio::coroutine{}, conn = &conn, omp = &omp](
       auto& self, boost::system::error_code ec = {}, result result = {}) mutable
     {
