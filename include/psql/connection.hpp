@@ -31,7 +31,7 @@ class basic_connection
   using wait_type   = typename socket_type::wait_type;
   using error_code  = boost::system::error_code;
 
-  std::unique_ptr<PGconn, pgconn_deleter> conn_;
+  std::unique_ptr<PGconn, pgconn_deleter> pgconn_;
   socket_type socket_;
   asio::cancellation_signal notification_cs_;
 
@@ -54,6 +54,21 @@ public:
     return socket_.get_executor();
   }
 
+  PGconn* native_handle() const noexcept
+  {
+    return pgconn_.get();
+  }
+
+  std::string_view error_message() const noexcept
+  {
+    return PQerrorMessage(pgconn_.get());
+  }
+
+  void close() const noexcept
+  {
+    pgconn_.release();
+  }
+
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_connect(std::string conninfo, CompletionToken&& token = CompletionToken{})
   {
@@ -65,20 +80,21 @@ public:
 
         if (std::exchange(init, false))
         {
-          conn_.reset(PQconnectStart(conninfo.data()));
-          socket_.assign(PQsocket(conn_.get()));
+          pgconn_.reset(PQconnectStart(conninfo.data()));
 
-          if (PQstatus(conn_.get()) == CONNECTION_BAD)
+          if (PQstatus(pgconn_.get()) == CONNECTION_BAD)
             return self.complete(error::pq_status_failed);
 
-          if (PQsetnonblocking(conn_.get(), 1))
+          if (PQsetnonblocking(pgconn_.get(), 1))
             return self.complete(error::pq_set_non_blocking_failed);
 
           PQsetNoticeProcessor(
-            conn_.get(), +[](void*, const char*) {}, nullptr);
+            pgconn_.get(), +[](void*, const char*) {}, nullptr);
+
+          socket_.assign(PQsocket(pgconn_.get()));
         }
 
-        auto ret = PQconnectPoll(conn_.get());
+        auto ret = PQconnectPoll(pgconn_.get());
 
         if (ret == PGRES_POLLING_READING)
           return socket_.async_wait(wait_type::wait_read, std::move(self));
@@ -104,18 +120,18 @@ public:
        results   = std::vector<result>{},
        thrown    = false,
        index     = size_t{},
-       operation = std::move(operation)](auto& self, error_code ec = {}, result result = {}) mutable
+       operation = std::forward<Operation>(operation)](auto& self, error_code ec = {}, result result = {}) mutable
       {
         if (ec)
           return self.complete(ec, {});
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          if (!PQenterPipelineMode(conn_.get()))
+          if (!PQenterPipelineMode(pgconn_.get()))
             return self.complete(error::pq_enter_pipeline_mode_failed, {});
 
           {
-            auto pipeline = psql::pipeline{ conn_.get() };
+            auto pipeline = psql::pipeline{ pgconn_.get() };
             try
             {
               operation(pipeline);
@@ -128,7 +144,7 @@ public:
             results.resize(pipeline.size());
           }
 
-          if (!PQpipelineSync(conn_.get()))
+          if (!PQpipelineSync(pgconn_.get()))
             return self.complete(error::pq_pipeline_sync_failed, {});
 
           BOOST_ASIO_CORO_YIELD async_flush(std::move(self));
@@ -145,7 +161,7 @@ public:
           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
           BOOST_ASSERT(PQresultStatus(result.native_handle()) == PGRES_PIPELINE_SYNC);
 
-          if (!PQexitPipelineMode(conn_.get()))
+          if (!PQexitPipelineMode(pgconn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
           if (thrown)
@@ -174,7 +190,7 @@ public:
       [this, query = std::move(query), params = std::move(params)]() -> error_code
       {
         if (!PQsendQueryParams(
-              conn_.get(),
+              pgconn_.get(),
               query.data(),
               params.count(),
               params.types(),
@@ -194,7 +210,7 @@ public:
     return async_generic_single_result_query(
       [this, query = std::move(query), stmt_name = std::move(stmt_name)]() -> error_code
       {
-        if (!PQsendPrepare(conn_.get(), stmt_name.data(), query.data(), 0, nullptr))
+        if (!PQsendPrepare(pgconn_.get(), stmt_name.data(), query.data(), 0, nullptr))
           return error::pq_send_prepare_failed;
         return {};
       },
@@ -208,7 +224,7 @@ public:
       [this, stmt_name = std::move(stmt_name), params = std::move(params)]() -> error_code
       {
         if (!PQsendQueryPrepared(
-              conn_.get(), stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
+              pgconn_.get(), stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
           return error::pq_send_query_prepared_failed;
         return {};
       },
@@ -221,7 +237,7 @@ public:
     return async_generic_single_result_query(
       [this, stmt_name = std::move(stmt_name)]() -> error_code
       {
-        if (!PQsendDescribePrepared(conn_.get(), stmt_name.data()))
+        if (!PQsendDescribePrepared(pgconn_.get(), stmt_name.data()))
           return error::pq_send_describe_prepared_failed;
         return {};
       },
@@ -234,7 +250,7 @@ public:
     return async_generic_single_result_query(
       [this, portal_name = std::move(portal_name)]() -> error_code
       {
-        if (!PQsendDescribePortal(conn_.get(), portal_name.data()))
+        if (!PQsendDescribePortal(pgconn_.get(), portal_name.data()))
           return error::pq_send_describe_portal_failed;
         return {};
       },
@@ -255,7 +271,7 @@ public:
         {
           for (;;)
           {
-            if ((stored_notification = notification{ PQnotifies(conn_.get()) }))
+            if ((stored_notification = notification{ PQnotifies(pgconn_.get()) }))
             {
               if (needs_rescheduling)
               {
@@ -271,7 +287,7 @@ public:
             BOOST_ASIO_CORO_YIELD socket_.async_wait(
               wait_type::wait_read, asio::bind_cancellation_slot(notification_cs_.slot(), std::move(self)));
 
-            if (!PQconsumeInput(conn_.get()))
+            if (!PQconsumeInput(pgconn_.get()))
               return self.complete(error::pq_consume_input_failed, {});
           }
         }
@@ -280,15 +296,10 @@ public:
       socket_);
   }
 
-  std::string_view error_message() const noexcept
-  {
-    return PQerrorMessage(conn_.get());
-  }
-
   ~basic_connection()
   {
     // PQfinish handles the closing of the socket.
-    if (conn_)
+    if (pgconn_)
       socket_.release();
   }
 
@@ -304,7 +315,7 @@ private:
           if (ec2)
             return self.complete(ec2);
 
-          if (!PQconsumeInput(conn_.get()))
+          if (!PQconsumeInput(pgconn_.get()))
             return self.complete(error::pq_consume_input_failed);
         }
         else
@@ -312,7 +323,7 @@ private:
           if (ec1)
             return self.complete(ec1);
 
-          int ret = PQflush(conn_.get());
+          const int ret = PQflush(pgconn_.get());
 
           if (ret == -1)
             return self.complete(error::pq_flush_failed);
@@ -341,11 +352,11 @@ private:
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          while (PQisBusy(conn_.get()))
+          while (PQisBusy(pgconn_.get()))
           {
             needs_rescheduling = false;
             BOOST_ASIO_CORO_YIELD socket_.async_wait(wait_type::wait_read, std::move(self));
-            if (!PQconsumeInput(conn_.get()))
+            if (!PQconsumeInput(pgconn_.get()))
               return self.complete(error::pq_consume_input_failed, {});
           }
 
@@ -354,7 +365,7 @@ private:
             BOOST_ASIO_CORO_YIELD asio::post(std::move(self));
           }
 
-          self.complete({}, result{ PQgetResult(conn_.get()) });
+          self.complete({}, result{ PQgetResult(pgconn_.get()) });
         }
       },
       token,
@@ -365,7 +376,7 @@ private:
   auto async_generic_single_result_query(F&& send_fn, CompletionToken&& token)
   {
     return asio::async_compose<CompletionToken, void(error_code, result)>(
-      [this, coro = asio::coroutine{}, stored_result = result{}, send_fn = std::move(send_fn)](
+      [this, coro = asio::coroutine{}, stored_result = result{}, send_fn = std::forward<F>(send_fn)](
         auto& self, error_code ec = {}, result result = {}) mutable
       {
         if (ec)

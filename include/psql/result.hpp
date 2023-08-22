@@ -16,7 +16,7 @@ class result
     }
   };
 
-  std::unique_ptr<PGresult, pgresult_deleter> pg_result_;
+  std::unique_ptr<PGresult, pgresult_deleter> pgresult_;
 
 public:
   class const_iterator;
@@ -24,7 +24,7 @@ public:
   result() = default;
 
   explicit result(PGresult* pg_result)
-    : pg_result_{ pg_result }
+    : pgresult_{ pg_result }
   {
   }
 
@@ -34,25 +34,25 @@ public:
 
   row operator[](int index) const noexcept
   {
-    return row{ pg_result_.get(), index };
+    return row{ pgresult_.get(), index };
   }
 
   row at(int index) const
   {
     if (static_cast<size_t>(index) < size())
-      return row{ pg_result_.get(), index };
+      return row{ pgresult_.get(), index };
 
     throw std::out_of_range{ std::string{ "No row at index " } + std::to_string(index) + " exists" };
   }
 
   operator bool() const noexcept
   {
-    return !!pg_result_;
+    return !!pgresult_;
   }
 
   size_t size() const noexcept
   {
-    return PQntuples(pg_result_.get());
+    return PQntuples(pgresult_.get());
   }
 
   [[nodiscard]] bool empty() const noexcept
@@ -62,23 +62,23 @@ public:
 
   PGresult* native_handle() const noexcept
   {
-    return pg_result_.get();
+    return pgresult_.get();
   }
 
   std::string_view error_message() const noexcept
   {
-    return PQresultErrorMessage(pg_result_.get());
+    return PQresultErrorMessage(pgresult_.get());
   }
 
   [[nodiscard]] PGresult* release() noexcept
   {
-    return pg_result_.release();
+    return pgresult_.release();
   }
 };
 
 class result::const_iterator
 {
-  const PGresult* pg_result_{};
+  const PGresult* pgresult_{};
   int row_{};
 
 public:
@@ -91,7 +91,7 @@ public:
   const_iterator() = default;
 
   const_iterator(const PGresult* pg_result, int row)
-    : pg_result_{ pg_result }
+    : pgresult_{ pg_result }
     , row_{ row }
   {
   }
@@ -129,28 +129,28 @@ public:
 
   bool operator==(const const_iterator& rhs) const
   {
-    return pg_result_ == rhs.pg_result_ && row_ == rhs.row_;
+    return pgresult_ == rhs.pgresult_ && row_ == rhs.row_;
   }
 
   row operator*() const
   {
-    return row{ pg_result_, row_ };
+    return row{ pgresult_, row_ };
   }
 
   row operator->() const
   {
-    return row{ pg_result_, row_ };
+    return row{ pgresult_, row_ };
   }
 };
 
 inline result::const_iterator result::begin() const noexcept
 {
-  return const_iterator{ pg_result_.get(), 0 };
+  return const_iterator{ pgresult_.get(), 0 };
 }
 
 inline result::const_iterator result::end() const noexcept
 {
-  return const_iterator{ pg_result_.get(), static_cast<int>(size()) };
+  return const_iterator{ pgresult_.get(), static_cast<int>(size()) };
 }
 
 template<typename... Ts>

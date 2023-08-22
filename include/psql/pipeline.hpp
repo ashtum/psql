@@ -23,7 +23,7 @@ public:
   pipeline(const pipeline&) = delete;
   pipeline(pipeline&&)      = delete;
 
-  size_t push_query(std::string query, params params = {})
+  size_t push_query(const std::string& query, const params& params = {})
   {
     if (!PQsendQueryParams(
           pgconn_,
@@ -39,7 +39,7 @@ public:
     return index_++;
   }
 
-  size_t push_query_prepared(std::string stmt_name, params params = {})
+  size_t push_query_prepared(const std::string& stmt_name, const params& params = {})
   {
     if (!PQsendQueryPrepared(
           pgconn_, stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
