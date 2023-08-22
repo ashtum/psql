@@ -9,9 +9,6 @@
 
 namespace psql
 {
-template<typename>
-struct user_defined;
-
 class oid_map
 {
   struct pg_type_info
@@ -26,9 +23,9 @@ class oid_map
 public:
   template<typename T>
     requires is_user_defined<T>::value
-  void register_type(std::string name)
+  void register_type()
   {
-    types_.emplace(typeid(T), pg_type_info{ std::move(name) });
+    types_.emplace(typeid(T), pg_type_info{ user_defined<T>::name });
   }
 
   void set_type_oids(std::string_view name, int type_oid, int array_oid)
@@ -81,6 +78,14 @@ private:
     throw std::runtime_error{ "The specified type does not exist in the oid_map" };
   }
 };
+
+template<typename... Ts>
+oid_map make_oid_map()
+{
+  auto result = oid_map{};
+  (result.register_type<Ts>(), ...);
+  return result;
+}
 
 static const inline oid_map empty_omp;
 } // namespace psql
