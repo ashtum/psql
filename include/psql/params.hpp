@@ -1,6 +1,7 @@
 #pragma once
 
 #include <psql/detail/serialization.hpp>
+#include <psql/detail/type_name_of.hpp>
 
 #include <libpq-fe.h>
 
@@ -11,73 +12,88 @@ namespace psql
 {
 class params
 {
-  std::string buffer_;
-  std::vector<Oid> types_;
-  std::vector<const char*> values_;
-  std::vector<int> lengths_;
-  std::vector<int> formats_;
+  struct interface
+  {
+    virtual std::vector<std::string_view> user_defined_type_names() const = 0;
+
+    virtual void serialize(std::string&, std::vector<Oid>&, std::vector<int>&, const detail::oid_map&) const = 0;
+
+    virtual ~interface() = default;
+
+    template<typename T>
+    static void
+    add(std::string& buffer, std::vector<Oid>& types, std::vector<int>& lengths, const detail::oid_map& omp, T&& value)
+    {
+      types.push_back(detail::oid_of<std::decay_t<T>>(omp));
+      lengths.push_back(detail::size_of<std::decay_t<T>>(value));
+      detail::serialize<std::decay_t<T>>(omp, &buffer, value);
+    }
+  };
+
+  std::unique_ptr<interface> impl_;
 
 public:
-  params() = default;
-
-  template<typename... Ts>
-  params(const oid_map& omp, Ts&&... args)
-    requires(!(std::is_same_v<psql::params, std::decay_t<Ts>> || ...))
-  {
-    buffer_.reserve(64);
-    (add(omp, std::forward<Ts>(args)), ...);
-    convert_offsets();
-  }
-
   template<typename... Ts>
   params(Ts&&... args)
-    requires(!((std::is_same_v<oid_map, std::decay_t<Ts>> || std::is_same_v<psql::params, std::decay_t<Ts>>) || ...))
-    : params{ empty_omp, std::forward<Ts>(args)... }
+    requires(!(std::is_same_v<psql::params, std::decay_t<Ts>> || ...))
+    : impl_{ std::make_unique<impl<Ts...>>(args...) }
   {
   }
 
-  int count() const
+  std::vector<std::string_view> user_defined_type_names() const
   {
-    return static_cast<int>(types_.size());
+    return impl_->user_defined_type_names();
   }
 
-  const Oid* types() const
+  void serialize(
+    std::string& buffer,
+    std::vector<Oid>& types,
+    std::vector<int>& lengths,
+    std::vector<const char*>& values,
+    std::vector<int>& formats,
+    const detail::oid_map& omp) const
   {
-    return types_.data();
-  }
+    buffer.clear();
+    types.clear();
+    lengths.clear();
+    values.clear();
+    formats.clear();
 
-  const char* const* values() const
-  {
-    return values_.data();
-  }
+    impl_->serialize(buffer, types, lengths, omp);
 
-  const int* lengths() const
-  {
-    return lengths_.data();
-  }
-
-  const int* formats() const
-  {
-    return formats_.data();
+    for (size_t offset = 0; const auto& length : lengths)
+    {
+      values.push_back(length ? buffer.data() + offset : nullptr);
+      offset += length;
+      formats.push_back(1); // All items are in binary format
+    }
   }
 
 private:
-  template<typename T>
-  void add(const oid_map& omp, T&& value)
+  template<typename... Ts>
+  struct impl : interface
   {
-    types_.push_back(detail::oid_of<std::decay_t<T>>(omp));
-    lengths_.push_back(detail::size_of<std::decay_t<T>>(value));
-    detail::serialize<std::decay_t<T>>(omp, &buffer_, value);
-  }
+    std::tuple<Ts...> params;
 
-  void convert_offsets()
-  {
-    for (size_t offset = 0; const auto& length : lengths_)
+    impl(Ts... args)
+      : params{ args... }
     {
-      values_.push_back(length ? buffer_.data() + offset : nullptr);
-      offset += length;
-      formats_.push_back(1); // All items are in binary format
     }
-  }
+
+    std::vector<std::string_view> user_defined_type_names() const override
+    {
+      auto vec = std::vector<std::string_view>{};
+      detail::type_name_of<decltype(params)>(vec);
+      return vec;
+    }
+
+    void serialize(std::string& buffer, std::vector<Oid>& types, std::vector<int>& lengths, const detail::oid_map& omp)
+      const override
+    {
+      std::apply(
+        [&](auto&&... param) { (add(buffer, types, lengths, omp, std::forward<decltype(param)>(param)), ...); },
+        params);
+    }
+  };
 };
 } // namespace psql

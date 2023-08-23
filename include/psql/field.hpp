@@ -54,16 +54,16 @@ public:
 };
 
 template<typename T>
-T as(const field& field, const oid_map& omp = empty_omp)
+T as(const field& field)
 {
   auto result = T{};
 
-  const auto expected_oid = detail::oid_of<T>(omp);
-  if (expected_oid != field.oid())
+  const auto expected_oid = detail::oid_of<T>();
+  if (expected_oid != 0 && expected_oid != field.oid())
     throw std::runtime_error{ "Mismatched Object Identifiers (OIDs) in received and expected types. Found " +
                               std::to_string(field.oid()) + " instead of " + std::to_string(expected_oid) };
 
-  detail::deserialize(omp, { field.data(), field.size() }, result);
+  detail::deserialize({ field.data(), field.size() }, result);
 
   return result;
 }

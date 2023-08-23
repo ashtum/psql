@@ -154,8 +154,8 @@ inline result::const_iterator result::end() const noexcept
 }
 
 template<typename... Ts>
-auto as(const result& result, const oid_map& omp = empty_omp)
+auto as(const result& result)
 {
-  return as<Ts...>(result.at(0), omp);
+  return as<Ts...>(result.at(0));
 }
 } // namespace psql

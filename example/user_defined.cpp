@@ -1,5 +1,4 @@
 #include <psql/connection.hpp>
-#include <psql/query_oids.hpp>
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/deferred.hpp>
@@ -44,14 +43,11 @@ asio::awaitable<void> run_exmaple(psql::connection& conn)
   co_await conn.async_query("CREATE TYPE employee AS (name TEXT, phone TEXT);", asio::deferred);
   co_await conn.async_query("CREATE TYPE company AS (id INT8, employees employee[]);", asio::deferred);
 
-  auto oid_map = psql::make_oid_map<Employee, Company>();
-  co_await psql::async_query_oids(conn, oid_map, asio::deferred);
-
   auto company = Company{ 104, { { "John Doe", "555-123-4567" }, { "Jane Smith", "555-987-6543" } } };
 
-  auto result = co_await conn.async_query("SELECT $1;", { oid_map, company }, asio::deferred);
+  auto result = co_await conn.async_query("SELECT $1;", company, asio::deferred);
 
-  auto [id, employees] = as<Company>(result, oid_map);
+  auto [id, employees] = as<Company>(result);
 
   std::cout << "company id:" << id << std::endl;
 
