@@ -1,5 +1,7 @@
 #pragma once
 
+#include <psql/detail/serialization.hpp>
+#include <psql/detail/type_name_of.hpp>
 #include <psql/error.hpp>
 #include <psql/notification.hpp>
 #include <psql/pipeline.hpp>
@@ -35,15 +37,9 @@ class basic_connection
   std::unique_ptr<PGconn, pgconn_deleter> pgconn_;
   socket_type socket_;
   asio::cancellation_signal notification_cs_;
-
   detail::oid_map oid_map_;
-  std::vector<std::string_view> user_defined_types_names_;
-
+  std::vector<std::string_view> ud_types_names_;
   std::string buffer_;
-  std::vector<Oid> types_;
-  std::vector<int> lengths_;
-  std::vector<const char*> values_;
-  std::vector<int> formats_;
 
 public:
   using executor_type = Executor;
@@ -127,8 +123,8 @@ public:
     return asio::async_compose<CompletionToken, void(error_code, std::vector<result>)>(
       [this,
        coro      = asio::coroutine{},
-       pipeline  = psql::pipeline{},
        results   = std::vector<result>{},
+       thrown    = false,
        index     = size_t{},
        operation = std::forward<Operation>(operation)](auto& self, error_code ec = {}, result result = {}) mutable
       {
@@ -137,65 +133,22 @@ public:
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          try
-          {
-            operation(pipeline);
-          }
-          catch (...)
-          {
-            return self.complete(error::exception_in_pipeline_operation, {});
-          }
-
-          while (index < pipeline.items.size())
-          {
-            pipeline.items[index].params.user_defined_type_names(user_defined_types_names_, oid_map_);
-            if (!user_defined_types_names_.empty())
-            {
-              BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
-              if (ec)
-                return self.complete(ec, {});
-            }
-            index++;
-          }
-          index = 0;
-
           if (!PQenterPipelineMode(pgconn_.get()))
             return self.complete(error::pq_enter_pipeline_mode_failed, {});
 
-          while (index < pipeline.items.size())
           {
-            pipeline.items[index].params.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
-
-            if (pipeline.items[index].is_query)
+            auto pipeline = psql::pipeline{ pgconn_.get(), &oid_map_, &buffer_ };
+            try
             {
-              if (!PQsendQueryParams(
-                    pgconn_.get(),
-                    pipeline.items[index].query_or_stmt_name.data(),
-                    types_.size(),
-                    types_.data(),
-                    values_.data(),
-                    lengths_.data(),
-                    formats_.data(),
-                    1))
-                return self.complete(error::pq_send_query_params_failed, {});
+              operation(pipeline);
             }
-            else
+            catch (...)
             {
-              if (!PQsendQueryPrepared(
-                    pgconn_.get(),
-                    pipeline.items[index].query_or_stmt_name.data(),
-                    types_.size(),
-                    values_.data(),
-                    lengths_.data(),
-                    formats_.data(),
-                    1))
-                return self.complete(error::pq_send_query_prepared_failed, {});
+              thrown = true;
+              pipeline.push_query("ROLLBACK;");
             }
-            index++;
+            results.resize(pipeline.size());
           }
-          index = 0;
-
-          results.resize(pipeline.items.size());
 
           if (!PQpipelineSync(pgconn_.get()))
             return self.complete(error::pq_pipeline_sync_failed, {});
@@ -217,6 +170,9 @@ public:
           if (!PQexitPipelineMode(pgconn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
+          if (thrown)
+            return self.complete(error::exception_in_pipeline_operation, {});
+
           notification_cs_.emit(asio::cancellation_type::terminal);
           auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
           return self.complete(result_ec, std::move(results));
@@ -229,11 +185,11 @@ public:
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_query(std::string query, CompletionToken&& token = CompletionToken{})
   {
-    return async_query(std::move(query), {}, std::forward<CompletionToken>(token));
+    return async_query(std::move(query), std::tuple{}, std::forward<CompletionToken>(token));
   }
 
-  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto async_query(std::string query, params params, CompletionToken&& token = CompletionToken{})
+  template<typename... Params, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query(std::string query, std::tuple<Params...> params, CompletionToken&& token = CompletionToken{})
   {
     return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, query = std::move(query), params = std::move(params)](
@@ -241,28 +197,29 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          params.user_defined_type_names(user_defined_types_names_, oid_map_);
+          detail::extract_user_defined_types_names<Params...>(ud_types_names_, oid_map_);
 
-          if (!user_defined_types_names_.empty())
+          if (!ud_types_names_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
               return self.complete(ec, {});
           }
 
-          params.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
+          {
+            auto [types, values, lengths, formats] = detail::serialize_tuple(oid_map_, buffer_, params);
 
-          if (!PQsendQueryParams(
-                pgconn_.get(),
-                query.data(),
-                types_.size(),
-                types_.data(),
-                values_.data(),
-                lengths_.data(),
-                formats_.data(),
-                1))
-            return self.complete(error::pq_send_query_params_failed, {});
-
+            if (!PQsendQueryParams(
+                  pgconn_.get(),
+                  query.data(),
+                  types.size(),
+                  types.data(),
+                  values.data(),
+                  lengths.data(),
+                  formats.data(),
+                  1))
+              return self.complete(error::pq_send_query_params_failed, {});
+          }
           BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
           return self.complete(ec, std::move(result));
         }
@@ -291,8 +248,9 @@ public:
       socket_);
   }
 
-  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto async_query_prepared(std::string stmt_name, params params, CompletionToken&& token = CompletionToken{})
+  template<typename... Params, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto
+  async_query_prepared(std::string stmt_name, std::tuple<Params...> params, CompletionToken&& token = CompletionToken{})
   {
     return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, stmt_name = std::move(stmt_name), params = std::move(params)](
@@ -300,20 +258,22 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          params.user_defined_type_names(user_defined_types_names_, oid_map_);
+          detail::extract_user_defined_types_names<Params...>(ud_types_names_, oid_map_);
 
-          if (!user_defined_types_names_.empty())
+          if (!ud_types_names_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
               return self.complete(ec, {});
           }
 
-          params.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
+          {
+            auto [types, values, lengths, formats] = detail::serialize_tuple(oid_map_, buffer_, params);
 
-          if (!PQsendQueryPrepared(
-                pgconn_.get(), stmt_name.data(), types_.size(), values_.data(), lengths_.data(), formats_.data(), 1))
-            return self.complete(error::pq_send_query_prepared_failed, {});
+            if (!PQsendQueryPrepared(
+                  pgconn_.get(), stmt_name.data(), types.size(), values.data(), lengths.data(), formats.data(), 1))
+              return self.complete(error::pq_send_query_prepared_failed, {});
+          }
 
           BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
           return self.complete(ec, std::move(result));
@@ -488,24 +448,26 @@ private:
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          params{ user_defined_types_names_ }.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
-          user_defined_types_names_.clear();
+          {
+            auto [types, values, lengths, formats] =
+              detail::serialize_tuple(oid_map_, buffer_, std::tuple{ ud_types_names_ });
 
-          if (!PQsendQueryParams(
-                pgconn_.get(),
-                "SELECT"
-                "  type_name,"
-                "  COALESCE(to_regtype(type_name)::oid, - 1),"
-                "  COALESCE(to_regtype(type_name || '[]')::oid, - 1)"
-                "FROM"
-                "  UNNEST($1) As type_name",
-                types_.size(),
-                types_.data(),
-                values_.data(),
-                lengths_.data(),
-                formats_.data(),
-                1))
-            return self.complete(error::pq_send_query_params_failed);
+            if (!PQsendQueryParams(
+                  pgconn_.get(),
+                  "SELECT"
+                  "  type_name,"
+                  "  COALESCE(to_regtype(type_name)::oid, - 1),"
+                  "  COALESCE(to_regtype(type_name || '[]')::oid, - 1)"
+                  "FROM"
+                  "  UNNEST($1) As type_name",
+                  types.size(),
+                  types.data(),
+                  values.data(),
+                  lengths.data(),
+                  formats.data(),
+                  1))
+              return self.complete(error::pq_send_query_params_failed);
+          }
 
           BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
 

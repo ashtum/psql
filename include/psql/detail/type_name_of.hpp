@@ -23,6 +23,12 @@ void type_name_of(std::vector<std::string_view>& vec, const detail::oid_map& omp
   return type_name_of_impl<std::decay_t<T>>::apply(vec, omp);
 }
 
+template<typename... Params>
+void extract_user_defined_types_names(std::vector<std::string_view>& vec, const detail::oid_map& omp)
+{
+  (type_name_of<Params>(vec, omp), ...);
+}
+
 template<typename T>
   requires is_array<T>::value
 struct type_name_of_impl<T>
@@ -34,14 +40,14 @@ struct type_name_of_impl<T>
 };
 
 template<typename T>
-struct type_tag
-{
-};
-
-template<typename T>
   requires is_composite<T>::value
 struct type_name_of_impl<T>
 {
+  template<typename U>
+  struct type_tag
+  {
+  };
+
   static void apply(std::vector<std::string_view>& vec, const detail::oid_map& omp)
     requires is_user_defined<T>::value
   {
