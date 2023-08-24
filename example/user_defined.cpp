@@ -45,7 +45,8 @@ asio::awaitable<void> run_exmaple(psql::connection& conn)
 
   auto company = Company{ 104, { { "John Doe", "555-123-4567" }, { "Jane Smith", "555-987-6543" } } };
 
-  auto result = co_await conn.async_query("SELECT $1;", company, asio::deferred);
+  auto result = co_await conn.async_query("SELECT $1;", psql::params{ company }, asio::deferred);
+  auto result2 = co_await conn.async_query("SELECT $1;", psql::params{ company }, asio::deferred);
 
   auto [id, employees] = as<Company>(result);
 
