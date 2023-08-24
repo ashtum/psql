@@ -37,7 +37,7 @@ class basic_connection
   asio::cancellation_signal notification_cs_;
 
   detail::oid_map oid_map_;
-  std::vector<std::string_view> ud_type_names;
+  std::vector<std::string_view> user_defined_types_names_;
 
   std::string buffer_;
   std::vector<Oid> types_;
@@ -121,105 +121,110 @@ public:
       socket_);
   }
 
-  // template<typename Operation, typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  // auto async_exec_pipeline(Operation&& operation, CompletionToken&& token = CompletionToken{})
-  // {
-  //   return asio::async_compose<CompletionToken, void(error_code, std::vector<result>)>(
-  //     [this,
-  //      coro      = asio::coroutine{},
-  //      pipeline  = psql::pipeline{},
-  //      results   = std::vector<result>{},
-  //      index     = size_t{},
-  //      operation = std::forward<Operation>(operation)](auto& self, error_code ec = {}, result result = {}) mutable
-  //     {
-  //       if (ec)
-  //         return self.complete(ec, {});
+  template<typename Operation, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_exec_pipeline(Operation&& operation, CompletionToken&& token = CompletionToken{})
+  {
+    return asio::async_compose<CompletionToken, void(error_code, std::vector<result>)>(
+      [this,
+       coro      = asio::coroutine{},
+       pipeline  = psql::pipeline{},
+       results   = std::vector<result>{},
+       index     = size_t{},
+       operation = std::forward<Operation>(operation)](auto& self, error_code ec = {}, result result = {}) mutable
+      {
+        if (ec)
+          return self.complete(ec, {});
 
-  //       BOOST_ASIO_CORO_REENTER(coro)
-  //       {
-  //         try
-  //         {
-  //           operation(pipeline);
-  //         }
-  //         catch (...)
-  //         {
-  //           return self.complete(error::exception_in_pipeline_operation, {});
-  //         }
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          try
+          {
+            operation(pipeline);
+          }
+          catch (...)
+          {
+            return self.complete(error::exception_in_pipeline_operation, {});
+          }
 
-  //         while (index < pipeline.items.size())
-  //         {
-  //           BOOST_ASIO_CORO_YIELD async_query_oids(
-  //             pipeline.items[index].params.user_defined_type_names(), std::move(self));
-  //           index++;
-  //         }
-  //         index = 0;
+          while (index < pipeline.items.size())
+          {
+            pipeline.items[index].params.user_defined_type_names(user_defined_types_names_, oid_map_);
+            if (!user_defined_types_names_.empty())
+            {
+              BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
+              if (ec)
+                return self.complete(ec, {});
+            }
+            index++;
+          }
+          index = 0;
 
-  //         if (!PQenterPipelineMode(pgconn_.get()))
-  //           return self.complete(error::pq_enter_pipeline_mode_failed, {});
+          if (!PQenterPipelineMode(pgconn_.get()))
+            return self.complete(error::pq_enter_pipeline_mode_failed, {});
 
-  //         while (index < pipeline.items.size())
-  //         {
-  //           pipeline.items[index].params.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
+          while (index < pipeline.items.size())
+          {
+            pipeline.items[index].params.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
 
-  //           if (pipeline.items[index].is_prepared)
-  //           {
-  //             if (!PQsendQueryPrepared(
-  //                   pgconn_.get(),
-  //                   pipeline.items[index].query_or_stmt_name.data(),
-  //                   types_.size(),
-  //                   values_.data(),
-  //                   lengths_.data(),
-  //                   formats_.data(),
-  //                   1))
-  //               return self.complete(error::pq_send_query_prepared_failed, {});
-  //           }
-  //           else
-  //           {
-  //             if (!PQsendQueryParams(
-  //                   pgconn_.get(),
-  //                   pipeline.items[index].query_or_stmt_name.data(),
-  //                   types_.size(),
-  //                   types_.data(),
-  //                   values_.data(),
-  //                   lengths_.data(),
-  //                   formats_.data(),
-  //                   1))
-  //               return self.complete(error::pq_send_query_params_failed, {});
-  //           }
-  //           index++;
-  //         }
-  //         index = 0;
+            if (pipeline.items[index].is_query)
+            {
+              if (!PQsendQueryParams(
+                    pgconn_.get(),
+                    pipeline.items[index].query_or_stmt_name.data(),
+                    types_.size(),
+                    types_.data(),
+                    values_.data(),
+                    lengths_.data(),
+                    formats_.data(),
+                    1))
+                return self.complete(error::pq_send_query_params_failed, {});
+            }
+            else
+            {
+              if (!PQsendQueryPrepared(
+                    pgconn_.get(),
+                    pipeline.items[index].query_or_stmt_name.data(),
+                    types_.size(),
+                    values_.data(),
+                    lengths_.data(),
+                    formats_.data(),
+                    1))
+                return self.complete(error::pq_send_query_prepared_failed, {});
+            }
+            index++;
+          }
+          index = 0;
 
-  //         results.resize(pipeline.items.size());
+          results.resize(pipeline.items.size());
 
-  //         if (!PQpipelineSync(pgconn_.get()))
-  //           return self.complete(error::pq_pipeline_sync_failed, {});
+          if (!PQpipelineSync(pgconn_.get()))
+            return self.complete(error::pq_pipeline_sync_failed, {});
 
-  //         BOOST_ASIO_CORO_YIELD async_flush(std::move(self));
+          BOOST_ASIO_CORO_YIELD async_flush(std::move(self));
 
-  //         while (index < results.size())
-  //         {
-  //           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
-  //           results[index] = std::move(result);
-  //           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
-  //           BOOST_ASSERT(!result);
-  //           index++;
-  //         }
+          while (index < results.size())
+          {
+            BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
+            results[index] = std::move(result);
+            BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
+            BOOST_ASSERT(!result);
+            index++;
+          }
 
-  //         BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
-  //         BOOST_ASSERT(PQresultStatus(result.native_handle()) == PGRES_PIPELINE_SYNC);
+          BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
+          BOOST_ASSERT(PQresultStatus(result.native_handle()) == PGRES_PIPELINE_SYNC);
 
-  //         if (!PQexitPipelineMode(pgconn_.get()))
-  //           return self.complete(error::pq_exit_pipeline_mode_failed, {});
+          if (!PQexitPipelineMode(pgconn_.get()))
+            return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
-  //         notification_cs_.emit(asio::cancellation_type::terminal);
-  //         auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
-  //         return self.complete(result_ec, std::move(results));
-  //       }
-  //     },
-  //     token,
-  //     socket_);
-  // }
+          notification_cs_.emit(asio::cancellation_type::terminal);
+          auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
+          return self.complete(result_ec, std::move(results));
+        }
+      },
+      token,
+      socket_);
+  }
 
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_query(std::string query, CompletionToken&& token = CompletionToken{})
@@ -227,8 +232,8 @@ public:
     return async_query(std::move(query), {}, std::forward<CompletionToken>(token));
   }
 
-  template<typename... Ts, typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto async_query(std::string query, params<Ts...> params, CompletionToken&& token = CompletionToken{})
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query(std::string query, params params, CompletionToken&& token = CompletionToken{})
   {
     return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, query = std::move(query), params = std::move(params)](
@@ -236,9 +241,9 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          params.user_defined_type_names(ud_type_names, oid_map_);
+          params.user_defined_type_names(user_defined_types_names_, oid_map_);
 
-          if (!ud_type_names.empty())
+          if (!user_defined_types_names_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
@@ -286,8 +291,8 @@ public:
       socket_);
   }
 
-  template<typename... Ts, typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto async_query_prepared(std::string stmt_name, params<Ts...> params, CompletionToken&& token = CompletionToken{})
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query_prepared(std::string stmt_name, params params, CompletionToken&& token = CompletionToken{})
   {
     return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, stmt_name = std::move(stmt_name), params = std::move(params)](
@@ -295,9 +300,9 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          params.user_defined_type_names(ud_type_names, oid_map_);
+          params.user_defined_type_names(user_defined_types_names_, oid_map_);
 
-          if (!ud_type_names.empty())
+          if (!user_defined_types_names_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
@@ -483,13 +488,17 @@ private:
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          params{ ud_type_names }.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
-          ud_type_names.clear();
+          params{ user_defined_types_names_ }.serialize(buffer_, types_, lengths_, values_, formats_, oid_map_);
+          user_defined_types_names_.clear();
 
           if (!PQsendQueryParams(
                 pgconn_.get(),
-                "SELECT t, COALESCE(to_regtype(t)::oid, - 1), COALESCE(to_regtype(t || '[]')::oid, - 1) FROM "
-                "UNNEST($1) As t;",
+                "SELECT "
+                "type_name, "
+                "COALESCE(to_regtype(type_name)::oid, - 1), "
+                "COALESCE(to_regtype(type_name || '[]')::oid, - 1) "
+                "FROM "
+                "UNNEST($1) As type_name;",
                 types_.size(),
                 types_.data(),
                 values_.data(),
@@ -505,7 +514,7 @@ private:
 
           for (auto row : result)
           {
-            auto [type_name, type_oid, array_oid] = as<std::string, uint32_t, uint32_t>(row);
+            auto [type_name, type_oid, array_oid] = as<std::string_view, uint32_t, uint32_t>(row);
             oid_map_.emplace(type_name, detail::oid_pair{ type_oid, array_oid });
           }
 
