@@ -25,6 +25,7 @@ enum class error
   result_status_pipeline_aborted,
   result_status_unexpected,
   exception_in_pipeline_operation,
+  user_defined_type_does_not_exist,
 };
 
 inline const boost::system::error_category& error_category()
@@ -80,6 +81,8 @@ inline const boost::system::error_category& error_category()
           return "Unexpected status from query result";
         case error::exception_in_pipeline_operation:
           return "An exception occurred while executing the pipeline operation";
+        case error::user_defined_type_does_not_exist:
+          return "No user-defined type with the given name was found on the server";
         default:
           return "Unknown error";
       }

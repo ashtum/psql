@@ -493,12 +493,12 @@ private:
 
           if (!PQsendQueryParams(
                 pgconn_.get(),
-                "SELECT "
-                "type_name, "
-                "COALESCE(to_regtype(type_name)::oid, - 1), "
-                "COALESCE(to_regtype(type_name || '[]')::oid, - 1) "
-                "FROM "
-                "UNNEST($1) As type_name;",
+                "SELECT"
+                "  type_name,"
+                "  COALESCE(to_regtype(type_name)::oid, - 1),"
+                "  COALESCE(to_regtype(type_name || '[]')::oid, - 1)"
+                "FROM"
+                "  UNNEST($1) As type_name",
                 types_.size(),
                 types_.data(),
                 values_.data(),
@@ -515,6 +515,10 @@ private:
           for (auto row : result)
           {
             auto [type_name, type_oid, array_oid] = as<std::string_view, uint32_t, uint32_t>(row);
+
+            if (type_oid == 0xFFFFFFFF || array_oid == 0xFFFFFFFF)
+              return self.complete(error::user_defined_type_does_not_exist);
+
             oid_map_.emplace(type_name, detail::oid_pair{ type_oid, array_oid });
           }
 
