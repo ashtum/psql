@@ -32,7 +32,7 @@ auto serialize(const oid_map& omp, std::string& buffer, const params<Ts...>& par
       buffer.reserve((0 + ... + size_of(args)));
       buffer.clear();
 
-      return std::tuple{ std::array<Oid, sizeof...(Ts)>{ oid_of<decltype(args)>(omp)... },
+      return std::tuple{ std::array<uint32_t, sizeof...(Ts)>{ oid_of<decltype(args)>(omp)... },
                          std::array<const char*, sizeof...(Ts)>{ serialize(omp, buffer, args)... },
                          std::array<int, sizeof...(Ts)>{ static_cast<int>(size_of(args))... },
                          std::array<int, sizeof...(Ts)>{ static_cast<bool>(sizeof(args))... } };

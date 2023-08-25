@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <tuple>
 #include <vector>
 
@@ -28,6 +29,11 @@ struct is_array : std::false_type
 
 template<class T>
 struct is_array<std::vector<T>> : std::true_type
+{
+};
+
+template<class T, std::size_t N>
+struct is_array<std::array<T, N>> : std::true_type
 {
 };
 

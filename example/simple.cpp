@@ -31,7 +31,7 @@ asio::awaitable<void> run_exmaple(psql::connection& conn)
   }
 
   // Example 3
-  auto result = co_await conn.async_query("SELECT $1;", psql::mp(std::vector{ "1", "2", "3" }), asio::deferred);
+  auto result = co_await conn.async_query("SELECT $1;", psql::mp(std::array{ "1", "2", "3" }), asio::deferred);
   for (const auto value : as<std::vector<std::string_view>>(result))
     std::cout << value << ' ';
   std::cout << std::endl;
