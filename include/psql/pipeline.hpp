@@ -28,10 +28,10 @@ public:
   pipeline(const pipeline&) = delete;
   pipeline(pipeline&&)      = delete;
 
-  template<typename... Params>
-  size_t push_query(const std::string& query, std::tuple<Params...> params = std::tuple{})
+  template<typename... Ts>
+  size_t push_query(const std::string& query, params<Ts...> params = {})
   {
-    auto [types, values, lengths, formats] = detail::serialize_tuple(*oid_map_, *buffer_, params);
+    auto [types, values, lengths, formats] = detail::serialize(*oid_map_, *buffer_, params);
     if (!PQsendQueryParams(
           pgconn_, query.data(), types.size(), types.data(), values.data(), lengths.data(), formats.data(), 1))
       throw boost::system::system_error{ error::pq_send_query_params_failed };
@@ -39,10 +39,10 @@ public:
     return index_++;
   }
 
-  template<typename... Params>
-  size_t push_query_prepared(const std::string& stmt_name, std::tuple<Params...> params = std::tuple{})
+  template<typename... Ts>
+  size_t push_query_prepared(const std::string& stmt_name, params<Ts...> params = {})
   {
-    auto [types, values, lengths, formats] = detail::serialize_tuple(*oid_map_, *buffer_, params);
+    auto [types, values, lengths, formats] = detail::serialize(*oid_map_, *buffer_, params);
     if (!PQsendQueryPrepared(
           pgconn_, stmt_name.data(), types.count(), values.data(), lengths.data(), formats.data(), 1))
       throw boost::system::system_error{ error::pq_send_query_prepared_failed };

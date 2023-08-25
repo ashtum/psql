@@ -185,11 +185,11 @@ public:
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_query(std::string query, CompletionToken&& token = CompletionToken{})
   {
-    return async_query(std::move(query), std::tuple{}, std::forward<CompletionToken>(token));
+    return async_query(std::move(query), {}, std::forward<CompletionToken>(token));
   }
 
-  template<typename... Params, typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto async_query(std::string query, std::tuple<Params...> params, CompletionToken&& token = CompletionToken{})
+  template<typename... Ts, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query(std::string query, params<Ts...> params, CompletionToken&& token = CompletionToken{})
   {
     return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, query = std::move(query), params = std::move(params)](
@@ -197,7 +197,7 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          detail::extract_user_defined_types_names<Params...>(ud_types_names_, oid_map_);
+          detail::extract_user_defined_types_names<Ts...>(ud_types_names_, oid_map_);
 
           if (!ud_types_names_.empty())
           {
@@ -207,7 +207,7 @@ public:
           }
 
           {
-            auto [types, values, lengths, formats] = detail::serialize_tuple(oid_map_, buffer_, params);
+            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, params);
 
             if (!PQsendQueryParams(
                   pgconn_.get(),
@@ -268,7 +268,7 @@ public:
           }
 
           {
-            auto [types, values, lengths, formats] = detail::serialize_tuple(oid_map_, buffer_, params);
+            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, params);
 
             if (!PQsendQueryPrepared(
                   pgconn_.get(), stmt_name.data(), types.size(), values.data(), lengths.data(), formats.data(), 1))
@@ -449,8 +449,7 @@ private:
         BOOST_ASIO_CORO_REENTER(coro)
         {
           {
-            auto [types, values, lengths, formats] =
-              detail::serialize_tuple(oid_map_, buffer_, std::tuple{ ud_types_names_ });
+            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, mp(ud_types_names_));
 
             if (!PQsendQueryParams(
                   pgconn_.get(),

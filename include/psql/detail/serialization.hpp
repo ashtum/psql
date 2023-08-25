@@ -2,6 +2,7 @@
 
 #include <psql/detail/oid_of.hpp>
 #include <psql/detail/size_of.hpp>
+#include <psql/params.hpp>
 
 #include <boost/endian.hpp>
 
@@ -22,21 +23,21 @@ const char* serialize(const oid_map& omp, std::string& buffer, const T& v)
   return ret;
 }
 
-template<typename... Params>
-auto serialize_tuple(const oid_map& omp, std::string& buffer, const std::tuple<Params...>& params)
+template<typename... Ts>
+auto serialize(const oid_map& omp, std::string& buffer, const params<Ts...>& params)
 {
   return std::apply(
-    [&](const auto&... params)
+    [&](const auto&... args)
     {
-      buffer.reserve((0 + ... + size_of<Params>(params)));
+      buffer.reserve((0 + ... + size_of(args)));
       buffer.clear();
 
-      return std::tuple{ std::array<Oid, sizeof...(Params)>{ oid_of<Params>(omp)... },
-                         std::array<const char*, sizeof...(Params)>{ serialize(omp, buffer, params)... },
-                         std::array<int, sizeof...(Params)>{ static_cast<int>(size_of(params))... },
-                         std::array<int, sizeof...(Params)>{ static_cast<bool>(sizeof(params))... } };
+      return std::tuple{ std::array<Oid, sizeof...(Ts)>{ oid_of<decltype(args)>(omp)... },
+                         std::array<const char*, sizeof...(Ts)>{ serialize(omp, buffer, args)... },
+                         std::array<int, sizeof...(Ts)>{ static_cast<int>(size_of(args))... },
+                         std::array<int, sizeof...(Ts)>{ static_cast<bool>(sizeof(args))... } };
     },
-    params);
+    static_cast<const std::tuple<Ts...>&>(params));
 }
 
 template<typename T>
