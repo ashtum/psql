@@ -62,16 +62,16 @@ public:
 };
 
 template<typename T>
-auto as(const row& row, const oid_map& omp = empty_omp)
+auto as(const row& row)
 {
-  return as<T>(row.at(0), omp);
+  return as<T>(row.at(0));
 }
 
 template<typename T1, typename T2, typename... Ts>
-auto as(const row& row, const oid_map& omp = empty_omp)
+auto as(const row& row)
 {
   return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-    return std::tuple{ as<T1>(row.at(0), omp), as<T2>(row.at(1), omp), as<Ts>(row.at(Is + 2), omp)... };
+    return std::tuple{ as<T1>(row.at(0)), as<T2>(row.at(1)), as<Ts>(row.at(Is + 2))... };
   }(std::index_sequence_for<Ts...>{});
 }
 

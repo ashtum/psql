@@ -1,10 +1,13 @@
 #pragma once
 
+#include <psql/detail/serialization.hpp>
+#include <psql/detail/type_name_of.hpp>
 #include <psql/error.hpp>
 #include <psql/notification.hpp>
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
 
+#include <boost/asio/any_completion_handler.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/compose.hpp>
 #include <boost/asio/coroutine.hpp>
@@ -34,6 +37,9 @@ class basic_connection
   std::unique_ptr<PGconn, pgconn_deleter> pgconn_;
   socket_type socket_;
   asio::cancellation_signal notification_cs_;
+  detail::oid_map oid_map_;
+  std::vector<std::string_view> ud_types_names_;
+  std::string buffer_;
 
 public:
   using executor_type = Executor;
@@ -131,7 +137,7 @@ public:
             return self.complete(error::pq_enter_pipeline_mode_failed, {});
 
           {
-            auto pipeline = psql::pipeline{ pgconn_.get() };
+            auto pipeline = psql::pipeline{ pgconn_.get(), &oid_map_, &buffer_ };
             try
             {
               operation(pipeline);
@@ -167,10 +173,9 @@ public:
           if (thrown)
             return self.complete(error::exception_in_pipeline_operation, {});
 
-          auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
-          self.complete(result_ec, std::move(results));
-
           notification_cs_.emit(asio::cancellation_type::terminal);
+          auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
+          return self.complete(result_ec, std::move(results));
         }
       },
       token,
@@ -183,78 +188,139 @@ public:
     return async_query(std::move(query), {}, std::forward<CompletionToken>(token));
   }
 
-  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto async_query(std::string query, params params, CompletionToken&& token = CompletionToken{})
+  template<typename... Ts, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query(std::string query, params<Ts...> params, CompletionToken&& token = CompletionToken{})
   {
-    return async_generic_single_result_query(
-      [this, query = std::move(query), params = std::move(params)]() -> error_code
+    return asio::async_compose<CompletionToken, void(error_code, result)>(
+      [this, coro = asio::coroutine{}, query = std::move(query), params = std::move(params)](
+        auto& self, error_code ec = {}, result result = {}) mutable
       {
-        if (!PQsendQueryParams(
-              pgconn_.get(),
-              query.data(),
-              params.count(),
-              params.types(),
-              params.values(),
-              params.lengths(),
-              params.formats(),
-              1))
-          return error::pq_send_query_params_failed;
-        return {};
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          detail::extract_user_defined_types_names<Ts...>(ud_types_names_, oid_map_);
+
+          if (!ud_types_names_.empty())
+          {
+            BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
+            if (ec)
+              return self.complete(ec, {});
+          }
+
+          {
+            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, params);
+
+            if (!PQsendQueryParams(
+                  pgconn_.get(),
+                  query.data(),
+                  types.size(),
+                  types.data(),
+                  values.data(),
+                  lengths.data(),
+                  formats.data(),
+                  1))
+              return self.complete(error::pq_send_query_params_failed, {});
+          }
+          BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
+          return self.complete(ec, std::move(result));
+        }
       },
-      std::forward<CompletionToken>(token));
+      token,
+      socket_);
   }
 
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_prepare(std::string stmt_name, std::string query, CompletionToken&& token = CompletionToken{})
   {
-    return async_generic_single_result_query(
-      [this, query = std::move(query), stmt_name = std::move(stmt_name)]() -> error_code
+    return asio::async_compose<CompletionToken, void(error_code, result)>(
+      [this, coro = asio::coroutine{}, query = std::move(query), stmt_name = std::move(stmt_name)](
+        auto& self, error_code ec = {}, result result = {}) mutable
       {
-        if (!PQsendPrepare(pgconn_.get(), stmt_name.data(), query.data(), 0, nullptr))
-          return error::pq_send_prepare_failed;
-        return {};
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          if (!PQsendPrepare(pgconn_.get(), stmt_name.data(), query.data(), 0, nullptr))
+            return self.complete(error::pq_send_prepare_failed, {});
+
+          BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
+          return self.complete(ec, std::move(result));
+        }
       },
-      std::forward<CompletionToken>(token));
+      token,
+      socket_);
   }
 
-  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto async_query_prepared(std::string stmt_name, params params, CompletionToken&& token = CompletionToken{})
+  template<typename... Params, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto
+  async_query_prepared(std::string stmt_name, std::tuple<Params...> params, CompletionToken&& token = CompletionToken{})
   {
-    return async_generic_single_result_query(
-      [this, stmt_name = std::move(stmt_name), params = std::move(params)]() -> error_code
+    return asio::async_compose<CompletionToken, void(error_code, result)>(
+      [this, coro = asio::coroutine{}, stmt_name = std::move(stmt_name), params = std::move(params)](
+        auto& self, error_code ec = {}, result result = {}) mutable
       {
-        if (!PQsendQueryPrepared(
-              pgconn_.get(), stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
-          return error::pq_send_query_prepared_failed;
-        return {};
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          detail::extract_user_defined_types_names<Params...>(ud_types_names_, oid_map_);
+
+          if (!ud_types_names_.empty())
+          {
+            BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
+            if (ec)
+              return self.complete(ec, {});
+          }
+
+          {
+            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, params);
+
+            if (!PQsendQueryPrepared(
+                  pgconn_.get(), stmt_name.data(), types.size(), values.data(), lengths.data(), formats.data(), 1))
+              return self.complete(error::pq_send_query_prepared_failed, {});
+          }
+
+          BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
+          return self.complete(ec, std::move(result));
+        }
       },
-      token);
+      token,
+      socket_);
   }
 
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_describe_prepared(std::string stmt_name, CompletionToken&& token = CompletionToken{})
   {
-    return async_generic_single_result_query(
-      [this, stmt_name = std::move(stmt_name)]() -> error_code
+    return asio::async_compose<CompletionToken, void(error_code, result)>(
+      [this, coro = asio::coroutine{}, stmt_name = std::move(stmt_name)](
+        auto& self, error_code ec = {}, result result = {}) mutable
       {
-        if (!PQsendDescribePrepared(pgconn_.get(), stmt_name.data()))
-          return error::pq_send_describe_prepared_failed;
-        return {};
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          if (!PQsendDescribePrepared(pgconn_.get(), stmt_name.data()))
+            return self.complete(error::pq_send_describe_prepared_failed, {});
+
+          BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
+          return self.complete(ec, std::move(result));
+        }
       },
-      std::forward<CompletionToken>(token));
+      token,
+      socket_);
   }
 
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_describe_portal(std::string portal_name, CompletionToken&& token = CompletionToken{})
   {
-    return async_generic_single_result_query(
-      [this, portal_name = std::move(portal_name)]() -> error_code
+    return asio::async_compose<CompletionToken, void(error_code, result)>(
+      [this, coro = asio::coroutine{}, portal_name = std::move(portal_name)](
+        auto& self, error_code ec = {}, result result = {}) mutable
       {
-        if (!PQsendDescribePortal(pgconn_.get(), portal_name.data()))
-          return error::pq_send_describe_portal_failed;
-        return {};
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          if (!PQsendDescribePortal(pgconn_.get(), portal_name.data()))
+            return self.complete(error::pq_send_describe_portal_failed, {});
+
+          BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
+          return self.complete(ec, std::move(result));
+        }
       },
-      std::forward<CompletionToken>(token));
+      token,
+      socket_);
   }
 
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
@@ -362,33 +428,86 @@ private:
 
           if (needs_rescheduling)
           {
-            BOOST_ASIO_CORO_YIELD asio::post(std::move(self));
+            BOOST_ASIO_CORO_YIELD asio::post(socket_.get_executor(), std::move(self));
           }
 
-          self.complete({}, result{ PQgetResult(pgconn_.get()) });
+          return self.complete({}, result{ PQgetResult(pgconn_.get()) });
         }
       },
       token,
       socket_);
   }
 
-  template<typename F, typename CompletionToken>
-  auto async_generic_single_result_query(F&& send_fn, CompletionToken&& token)
+  auto async_query_oids_erased(asio::any_completion_handler<void(error_code)> handler)
   {
-    return asio::async_compose<CompletionToken, void(error_code, result)>(
-      [this, coro = asio::coroutine{}, stored_result = result{}, send_fn = std::forward<F>(send_fn)](
+    return asio::async_compose<decltype(handler), void(error_code)>(
+      [this, coro = asio::coroutine{}](auto& self, error_code ec = {}, result result = {}) mutable
+      {
+        if (ec)
+          return self.complete(ec);
+
+        BOOST_ASIO_CORO_REENTER(coro)
+        {
+          {
+            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, mp(ud_types_names_));
+
+            if (!PQsendQueryParams(
+                  pgconn_.get(),
+                  "SELECT"
+                  "  type_name,"
+                  "  COALESCE(to_regtype(type_name)::oid, - 1),"
+                  "  COALESCE(to_regtype(type_name || '[]')::oid, - 1)"
+                  "FROM"
+                  "  UNNEST($1) As type_name",
+                  types.size(),
+                  types.data(),
+                  values.data(),
+                  lengths.data(),
+                  formats.data(),
+                  1))
+              return self.complete(error::pq_send_query_params_failed);
+          }
+
+          BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
+
+          if (auto ec = result_status_to_error_code(result))
+            return self.complete(ec);
+
+          for (auto row : result)
+          {
+            auto [type_name, type_oid, array_oid] = as<std::string_view, uint32_t, uint32_t>(row);
+
+            if (type_oid == 0xFFFFFFFF || array_oid == 0xFFFFFFFF)
+              return self.complete(error::user_defined_type_does_not_exist);
+
+            oid_map_.emplace(type_name, detail::oid_pair{ type_oid, array_oid });
+          }
+
+          return self.complete({});
+        }
+      },
+      handler,
+      socket_);
+  }
+
+  template<typename CompletionToken>
+  auto async_query_oids(CompletionToken&& token)
+  {
+    return asio::async_initiate<CompletionToken, void(error_code)>(
+      [this](auto handler) { async_query_oids_erased(std::move(handler)); }, token);
+  }
+
+  void async_generic_single_result_query_erased(asio::any_completion_handler<void(error_code, result)> handler)
+  {
+    return asio::async_compose<decltype(handler), void(error_code, result)>(
+      [this, coro = asio::coroutine{}, stored_result = result{}](
         auto& self, error_code ec = {}, result result = {}) mutable
       {
         if (ec)
           return self.complete(ec, {});
 
-        void(this); // supress false warning "lambda capture 'this' is not used"
-
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          if (auto ec = send_fn())
-            return self.complete(ec, {});
-
           BOOST_ASIO_CORO_YIELD async_flush(std::move(self));
 
           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
@@ -397,13 +516,20 @@ private:
           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
           BOOST_ASSERT(!result);
 
-          auto result_ec = result_status_to_error_code(stored_result);
-          self.complete(result_ec, std::move(stored_result));
           notification_cs_.emit(asio::cancellation_type::terminal);
+          auto result_ec = result_status_to_error_code(stored_result);
+          return self.complete(result_ec, std::move(stored_result));
         }
       },
-      token,
+      handler,
       socket_);
+  }
+
+  template<typename CompletionToken>
+  auto async_generic_single_result_query(CompletionToken&& token)
+  {
+    return asio::async_initiate<CompletionToken, void(error_code, result)>(
+      [this](auto handler) { async_generic_single_result_query_erased(std::move(handler)); }, token);
   }
 
   static error_code result_status_to_error_code(const result& result) noexcept

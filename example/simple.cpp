@@ -16,8 +16,8 @@ asio::awaitable<void> run_exmaple(psql::connection& conn)
   // Example 2
   co_await conn.async_query("DROP TABLE IF EXISTS actors;", asio::deferred);
   co_await conn.async_query("CREATE TABLE actors (name TEXT, age INT);", asio::deferred);
-  co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", { "Bruce Lee", 32 }, asio::deferred);
-  co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", { "Jackie Chan", 70 }, asio::deferred);
+  co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", psql::mp("Bruce Lee", 32), asio::deferred);
+  co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", psql::mp("Jackie Chan", 70), asio::deferred);
   auto actors = co_await conn.async_query("SELECT name, age from actors", asio::deferred);
   for (const auto row : actors)
   {
@@ -31,7 +31,7 @@ asio::awaitable<void> run_exmaple(psql::connection& conn)
   }
 
   // Example 3
-  auto result = co_await conn.async_query("SELECT $1 as array;", std::vector{ "1", "2", "3" }, asio::deferred);
+  auto result = co_await conn.async_query("SELECT $1;", psql::mp(std::vector{ "1", "2", "3" }), asio::deferred);
   for (const auto value : as<std::vector<std::string_view>>(result))
     std::cout << value << ' ';
   std::cout << std::endl;

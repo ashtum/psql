@@ -1,7 +1,8 @@
 #pragma once
 
+#include <psql/detail/oid_map.hpp>
+#include <psql/detail/serialization.hpp>
 #include <psql/error.hpp>
-#include <psql/params.hpp>
 
 #include <boost/system/system_error.hpp>
 
@@ -12,37 +13,38 @@ namespace psql
 class pipeline
 {
   PGconn* pgconn_;
+  detail::oid_map* oid_map_;
+  std::string* buffer_;
   size_t index_{};
 
 public:
-  pipeline(PGconn* pgconn)
+  pipeline(PGconn* pgconn, detail::oid_map* oid_map, std::string* buffer)
     : pgconn_{ pgconn }
+    , oid_map_{ oid_map }
+    , buffer_{ buffer }
   {
   }
 
   pipeline(const pipeline&) = delete;
   pipeline(pipeline&&)      = delete;
 
-  size_t push_query(const std::string& query, const params& params = {})
+  template<typename... Ts>
+  size_t push_query(const std::string& query, params<Ts...> params = {})
   {
+    auto [types, values, lengths, formats] = detail::serialize(*oid_map_, *buffer_, params);
     if (!PQsendQueryParams(
-          pgconn_,
-          query.data(),
-          params.count(),
-          params.types(),
-          params.values(),
-          params.lengths(),
-          params.formats(),
-          1))
+          pgconn_, query.data(), types.size(), types.data(), values.data(), lengths.data(), formats.data(), 1))
       throw boost::system::system_error{ error::pq_send_query_params_failed };
 
     return index_++;
   }
 
-  size_t push_query_prepared(const std::string& stmt_name, const params& params = {})
+  template<typename... Ts>
+  size_t push_query_prepared(const std::string& stmt_name, params<Ts...> params = {})
   {
+    auto [types, values, lengths, formats] = detail::serialize(*oid_map_, *buffer_, params);
     if (!PQsendQueryPrepared(
-          pgconn_, stmt_name.data(), params.count(), params.values(), params.lengths(), params.formats(), 1))
+          pgconn_, stmt_name.data(), types.count(), values.data(), lengths.data(), formats.data(), 1))
       throw boost::system::system_error{ error::pq_send_query_prepared_failed };
 
     return index_++;

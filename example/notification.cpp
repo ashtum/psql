@@ -37,7 +37,7 @@ asio::awaitable<void> run_exmaple(psql::connection& conn)
     timer.expires_after(std::chrono::seconds{ 1 });
     co_await timer.async_wait(asio::deferred);
 
-    co_await conn.async_query("NOTIFY counter, '" + std::to_string(i) + "';", asio::deferred);
+    co_await conn.async_query("SELECT pg_notify('counter', $1::TEXT);", psql::mp(i), asio::deferred);
   }
 
   co_await receiver(asio::deferred);
