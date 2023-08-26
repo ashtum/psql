@@ -339,6 +339,8 @@ public:
 
         BOOST_ASIO_CORO_REENTER(coro)
         {
+          self.reset_cancellation_state(asio::enable_total_cancellation());
+
           for (;;)
           {
             if ((stored_notification = notification{ PQnotifies(pgconn_.get()) }))
