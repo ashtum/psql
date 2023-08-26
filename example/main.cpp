@@ -39,6 +39,6 @@ int main()
   }
   catch (const std::exception& e)
   {
-    std::cout << "exception:" << e.what() << std::endl;
+    std::cout << "Exception: " << e.what() << std::endl;
   }
 }

@@ -6,6 +6,7 @@
 #include <psql/notification.hpp>
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
+#include <psql/sqlstate.hpp>
 
 #include <boost/asio/any_completion_handler.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
@@ -545,6 +546,8 @@ private:
       case PGRES_EMPTY_QUERY:
         return error::result_status_empty_query;
       case PGRES_FATAL_ERROR:
+        if (char* e = PQresultErrorField(result.native_handle(), PG_DIAG_SQLSTATE))
+          return static_cast<sqlstate>(std::strtol(e, nullptr, 36));
         return error::result_status_fatal_error;
       case PGRES_PIPELINE_ABORTED:
         return error::result_status_pipeline_aborted;
