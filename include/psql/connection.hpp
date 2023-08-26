@@ -252,9 +252,8 @@ public:
       socket_);
   }
 
-  template<typename... Params, typename CompletionToken = asio::default_completion_token_t<executor_type>>
-  auto
-  async_query_prepared(std::string stmt_name, std::tuple<Params...> params, CompletionToken&& token = CompletionToken{})
+  template<typename... Ts, typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query_prepared(std::string stmt_name, params<Ts...> params, CompletionToken&& token = CompletionToken{})
   {
     return asio::async_compose<CompletionToken, void(error_code, result)>(
       [this, coro = asio::coroutine{}, stmt_name = std::move(stmt_name), params = std::move(params)](
@@ -262,7 +261,7 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          detail::extract_user_defined_types_names<Params...>(ud_types_names_, oid_map_);
+          detail::extract_user_defined_types_names<Ts...>(ud_types_names_, oid_map_);
 
           if (!ud_types_names_.empty())
           {
