@@ -804,8 +804,24 @@ inline const boost::system::error_category& sqlstate_category()
         case sqlstate::index_corrupted:
           return "index_corrupted";
         default:
-          return "Unknown sqlstate";
+          return "sqlstate error code:" + to_base36(ev);
       }
+    }
+
+  private:
+    static std::string to_base36(int value)
+    {
+      std::string result;
+
+      constexpr char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      while (value > 0)
+      {
+        result.push_back(digits[value % 36]);
+        value /= 36;
+      }
+
+      std::reverse(result.begin(), result.end());
+      return result;
     }
   };
 
