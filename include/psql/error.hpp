@@ -24,6 +24,7 @@ enum class error
   result_status_fatal_error,
   result_status_pipeline_aborted,
   result_status_unexpected,
+  unexpected_non_null_result,
   exception_in_pipeline_operation,
   user_defined_type_does_not_exist,
 };
@@ -79,6 +80,8 @@ inline const boost::system::error_category& error_category()
           return "Fatal error in pipeline execution, check the error message on the result";
         case error::result_status_unexpected:
           return "Unexpected status from query result";
+        case error::unexpected_non_null_result:
+          return "Unexpected non null result";
         case error::exception_in_pipeline_operation:
           return "An exception occurred while executing the pipeline operation";
         case error::user_defined_type_does_not_exist:

@@ -125,7 +125,7 @@ public:
       [this,
        coro      = asio::coroutine{},
        results   = std::vector<result>{},
-       thrown    = false,
+       is_thrown = false,
        index     = size_t{},
        operation = std::forward<Operation>(operation)](auto& self, error_code ec = {}, result result = {}) mutable
       {
@@ -145,7 +145,7 @@ public:
             }
             catch (...)
             {
-              thrown = true;
+              is_thrown = true;
               pipeline.push_query("ROLLBACK;");
             }
             results.resize(pipeline.size());
@@ -161,20 +161,23 @@ public:
             BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
             results[index] = std::move(result);
             BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
-            BOOST_ASSERT(!result);
+            if (result)
+              return self.complete(error::unexpected_non_null_result, {});
             index++;
           }
 
           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
-          BOOST_ASSERT(PQresultStatus(result.native_handle()) == PGRES_PIPELINE_SYNC);
+          if (PQresultStatus(result.native_handle()) != PGRES_PIPELINE_SYNC)
+            return self.complete(error::result_status_unexpected, {});
 
           if (!PQexitPipelineMode(pgconn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
-          if (thrown)
+          notification_cs_.emit(asio::cancellation_type::terminal);
+
+          if (is_thrown)
             return self.complete(error::exception_in_pipeline_operation, {});
 
-          notification_cs_.emit(asio::cancellation_type::terminal);
           auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
           return self.complete(result_ec, std::move(results));
         }
@@ -515,7 +518,8 @@ private:
           stored_result = std::move(result);
 
           BOOST_ASIO_CORO_YIELD async_receive_result(std::move(self));
-          BOOST_ASSERT(!result);
+          if (result)
+            return self.complete(error::unexpected_non_null_result, {});
 
           notification_cs_.emit(asio::cancellation_type::terminal);
           auto result_ec = result_status_to_error_code(stored_result);
