@@ -178,8 +178,13 @@ public:
           if (is_thrown)
             return self.complete(error::exception_in_pipeline_operation, {});
 
-          auto result_ec = results.empty() ? error{} : result_status_to_error_code(results.back());
-          return self.complete(result_ec, std::move(results));
+          for (const auto& result : results)
+          {
+            if (auto ec = result_status_to_error_code(result))
+              return self.complete(ec, std::move(results));
+          }
+
+          return self.complete({}, std::move(results));
         }
       },
       token,

@@ -77,7 +77,7 @@ inline const boost::system::error_category& error_category()
         case error::result_status_fatal_error:
           return "Fatal error in query execution, check the error message on the result";
         case error::result_status_pipeline_aborted:
-          return "Fatal error in pipeline execution, check the error message on the result";
+          return "Pipeline execution aborted, check the error message on the result";
         case error::result_status_unexpected:
           return "Unexpected status from query result";
         case error::unexpected_non_null_result:
