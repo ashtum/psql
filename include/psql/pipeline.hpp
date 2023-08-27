@@ -43,8 +43,7 @@ public:
   size_t push_query_prepared(const std::string& stmt_name, params<Ts...> params = {})
   {
     auto [types, values, lengths, formats] = detail::serialize(*oid_map_, *buffer_, params);
-    if (!PQsendQueryPrepared(
-          pgconn_, stmt_name.data(), types.count(), values.data(), lengths.data(), formats.data(), 1))
+    if (!PQsendQueryPrepared(pgconn_, stmt_name.data(), types.size(), values.data(), lengths.data(), formats.data(), 1))
       throw boost::system::system_error{ error::pq_send_query_prepared_failed };
 
     return index_++;

@@ -257,6 +257,12 @@ public:
       socket_);
   }
 
+  template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
+  auto async_query_prepared(std::string stmt_name, CompletionToken&& token = CompletionToken{})
+  {
+    return async_query_prepared(std::move(stmt_name), {}, std::forward<CompletionToken>(token));
+  }
+
   template<typename... Ts, typename CompletionToken = asio::default_completion_token_t<executor_type>>
   auto async_query_prepared(std::string stmt_name, params<Ts...> params, CompletionToken&& token = CompletionToken{})
   {
