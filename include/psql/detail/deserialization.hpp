@@ -71,7 +71,7 @@ inline void deserialize_and_verify_oid(std::span<const char> buffer, uint32_t ex
 }
 
 template<typename T>
-  requires is_composite<T>::value
+  requires(is_composite_v<T>)
 struct deserialize_impl<T>
 {
   template<typename U>
@@ -98,7 +98,7 @@ struct deserialize_impl<T>
   }
 
   static void apply(std::span<const char> buffer, T& value)
-    requires is_user_defined<T>::value
+    requires(is_user_defined_v<T>)
   {
     verify_member_counts(buffer, std::tuple_size_v<decltype(user_defined<T>::members)>);
     buffer = buffer.subspan(4);
@@ -106,7 +106,7 @@ struct deserialize_impl<T>
   }
 
   static void apply(std::span<const char> buffer, T& value)
-    requires is_tuple<T>::value
+    requires(is_tuple_v<T>)
   {
     verify_member_counts(buffer, std::tuple_size_v<T>);
     buffer = buffer.subspan(4);
@@ -115,7 +115,7 @@ struct deserialize_impl<T>
 };
 
 template<typename T>
-  requires is_array<T>::value
+  requires(is_array_v<T>)
 struct deserialize_impl<T>
 {
   using value_type = std::decay_t<typename T::value_type>;

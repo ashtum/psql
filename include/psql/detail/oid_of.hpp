@@ -24,60 +24,60 @@ uint32_t oid_of()
 }
 
 template<typename T>
-  requires is_array<T>::value
+  requires(is_array_v<T>)
 struct oid_of_impl<T>
 {
   using value_type = std::decay_t<typename T::value_type>;
 
   static uint32_t apply(const oid_map&)
-    requires(!is_user_defined<value_type>::value)
+    requires(!is_user_defined_v<value_type>)
   {
     return builtin<value_type>::array_oid;
   }
 
   static uint32_t apply()
-    requires(!is_user_defined<value_type>::value)
+    requires(!is_user_defined_v<value_type>)
   {
     return builtin<value_type>::array_oid;
   }
 
   static uint32_t apply(const oid_map& omp)
-    requires is_user_defined<value_type>::value
+    requires(is_user_defined_v<value_type>)
   {
     return omp.at(user_defined<value_type>::name).array;
   }
 
   static uint32_t apply()
-    requires is_user_defined<value_type>::value
+    requires(is_user_defined_v<value_type>)
   {
     return 0;
   }
 };
 
 template<typename T>
-  requires(!is_array<T>::value)
+  requires(!is_array_v<T>)
 struct oid_of_impl<T>
 {
   static uint32_t apply(const oid_map&)
-    requires(!is_user_defined<T>::value)
+    requires(!is_user_defined_v<T>)
   {
     return builtin<T>::type_oid;
   }
 
   static uint32_t apply()
-    requires(!is_user_defined<T>::value)
+    requires(!is_user_defined_v<T>)
   {
     return builtin<T>::type_oid;
   }
 
   static uint32_t apply(const oid_map& omp)
-    requires is_user_defined<T>::value
+    requires(is_user_defined_v<T>)
   {
     return omp.at(user_defined<T>::name).type;
   }
 
   static uint32_t apply()
-    requires is_user_defined<T>::value
+    requires(is_user_defined_v<T>)
   {
     return 0;
   }

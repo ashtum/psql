@@ -100,7 +100,7 @@ struct serialize_impl<std::string>
 };
 
 template<typename T>
-  requires is_composite<T>::value
+  requires(is_composite_v<T>)
 struct serialize_impl<T>
 {
   template<typename U>
@@ -112,14 +112,14 @@ struct serialize_impl<T>
   }
 
   static void apply(const oid_map& omp, std::string& buffer, const T& value)
-    requires is_user_defined<T>::value
+    requires(is_user_defined_v<T>)
   {
     serialize<int32_t>(omp, buffer, std::tuple_size_v<decltype(user_defined<T>::members)>);
     std::apply([&](auto&&... mems) { (serialize_member(omp, buffer, value.*mems), ...); }, user_defined<T>::members);
   }
 
   static void apply(const oid_map& omp, std::string& buffer, const T& value)
-    requires is_tuple<T>::value
+    requires(is_tuple_v<T>)
   {
     serialize<int32_t>(omp, buffer, std::tuple_size_v<T>);
     std::apply([&](auto&&... mems) { (serialize_member(omp, buffer, mems), ...); }, value);
@@ -127,7 +127,7 @@ struct serialize_impl<T>
 };
 
 template<typename T>
-  requires is_array<T>::value
+  requires(is_array_v<T>)
 struct serialize_impl<T>
 {
   using value_type = std::decay_t<typename T::value_type>;

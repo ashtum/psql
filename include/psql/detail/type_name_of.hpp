@@ -30,7 +30,7 @@ void extract_user_defined_types_names(std::vector<std::string_view>& vec, const 
 }
 
 template<typename T>
-  requires is_array<T>::value
+  requires(is_array_v<T>)
 struct type_name_of_impl<T>
 {
   static void apply(std::vector<std::string_view>& vec, const detail::oid_map& omp)
@@ -40,7 +40,7 @@ struct type_name_of_impl<T>
 };
 
 template<typename T>
-  requires is_composite<T>::value
+  requires(is_composite_v<T>)
 struct type_name_of_impl<T>
 {
   template<typename U>
@@ -49,7 +49,7 @@ struct type_name_of_impl<T>
   };
 
   static void apply(std::vector<std::string_view>& vec, const detail::oid_map& omp)
-    requires is_user_defined<T>::value
+    requires(is_user_defined_v<T>)
   {
     if (!omp.contains(user_defined<T>::name))
       vec.push_back(user_defined<T>::name);
@@ -58,7 +58,7 @@ struct type_name_of_impl<T>
   }
 
   static void apply(std::vector<std::string_view>& vec, const detail::oid_map& omp)
-    requires is_tuple<T>::value
+    requires(is_tuple_v<T>)
   {
     [&]<typename... Ts>(type_tag<std::tuple<Ts...>>) { (type_name_of<Ts>(vec, omp), ...); }(type_tag<T>{});
   }

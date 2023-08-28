@@ -66,7 +66,7 @@ struct size_of_impl<std::string>
 };
 
 template<typename T>
-  requires is_array<T>::value
+  requires(is_array_v<T>)
 struct size_of_impl<T>
 {
   static std::size_t apply(const T& vec)
@@ -79,11 +79,11 @@ struct size_of_impl<T>
 };
 
 template<typename T>
-  requires is_composite<T>::value
+  requires(is_composite_v<T>)
 struct size_of_impl<T>
 {
   static std::size_t apply(const T& value)
-    requires is_user_defined<T>::value
+    requires(is_user_defined_v<T>)
   {
     std::size_t size = 4;
     std::apply([&](auto&&... mems) { size += ((size_of(value.*mems) + 8) + ...); }, user_defined<T>::members);
@@ -91,7 +91,7 @@ struct size_of_impl<T>
   }
 
   static std::size_t apply(const T& value)
-    requires is_tuple<T>::value
+    requires(is_tuple_v<T>)
   {
     std::size_t size = 4;
     std::apply([&](auto&&... mems) { size += ((size_of(mems) + 8) + ...); }, value);
