@@ -37,7 +37,7 @@ class basic_connection
   socket_type socket_;
   std::unique_ptr<asio::cancellation_signal> notification_cs_ = std::make_unique<asio::cancellation_signal>();
   detail::oid_map oid_map_;
-  std::vector<std::string_view> ud_types_names_;
+  std::vector<std::string_view> udt_names_;
   std::string buffer_;
 
 public:
@@ -142,7 +142,7 @@ public:
             return self.complete(error::pq_enter_pipeline_mode_failed, {});
 
           {
-            auto pipeline = psql::pipeline{ pgconn_.get(), &oid_map_, &buffer_ };
+            auto pipeline = psql::pipeline{ pgconn_.get(), oid_map_, buffer_ };
             try
             {
               operation(pipeline);
@@ -210,9 +210,9 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          detail::extract_user_defined_types_names<Ts...>(ud_types_names_, oid_map_);
+          detail::extract_user_defined_types_names<Ts...>(udt_names_, oid_map_);
 
-          if (!ud_types_names_.empty())
+          if (!udt_names_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
@@ -220,17 +220,9 @@ public:
           }
 
           {
-            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, params);
+            auto [t, v, l, f] = detail::serialize(oid_map_, buffer_, params);
 
-            if (!PQsendQueryParams(
-                  pgconn_.get(),
-                  query.data(),
-                  types.size(),
-                  types.data(),
-                  values.data(),
-                  lengths.data(),
-                  formats.data(),
-                  1))
+            if (!PQsendQueryParams(pgconn_.get(), query.data(), t.size(), t.data(), v.data(), l.data(), f.data(), 1))
               return self.complete(error::pq_send_query_params_failed, {});
           }
           BOOST_ASIO_CORO_YIELD async_generic_single_result_query(std::move(self));
@@ -276,9 +268,9 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          detail::extract_user_defined_types_names<Ts...>(ud_types_names_, oid_map_);
+          detail::extract_user_defined_types_names<Ts...>(udt_names_, oid_map_);
 
-          if (!ud_types_names_.empty())
+          if (!udt_names_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
@@ -286,10 +278,9 @@ public:
           }
 
           {
-            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, params);
+            auto [t, v, l, f] = detail::serialize(oid_map_, buffer_, params);
 
-            if (!PQsendQueryPrepared(
-                  pgconn_.get(), stmt_name.data(), types.size(), values.data(), lengths.data(), formats.data(), 1))
+            if (!PQsendQueryPrepared(pgconn_.get(), stmt_name.data(), t.size(), v.data(), l.data(), f.data(), 1))
               return self.complete(error::pq_send_query_prepared_failed, {});
           }
 
@@ -469,7 +460,7 @@ private:
         BOOST_ASIO_CORO_REENTER(coro)
         {
           {
-            auto [types, values, lengths, formats] = detail::serialize(oid_map_, buffer_, mp(ud_types_names_));
+            auto [t, v, l, f] = detail::serialize(oid_map_, buffer_, mp(udt_names_));
 
             if (!PQsendQueryParams(
                   pgconn_.get(),
@@ -479,11 +470,11 @@ private:
                   "  COALESCE(to_regtype(type_name || '[]')::oid, - 1)"
                   "FROM"
                   "  UNNEST($1) As type_name",
-                  types.size(),
-                  types.data(),
-                  values.data(),
-                  lengths.data(),
-                  formats.data(),
+                  t.size(),
+                  t.data(),
+                  v.data(),
+                  l.data(),
+                  f.data(),
                   1))
               return self.complete(error::pq_send_query_params_failed);
           }

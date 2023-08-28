@@ -26,16 +26,24 @@ const char* serialize(const oid_map& omp, std::string& buffer, const T& v)
 template<typename... Ts>
 auto serialize(const oid_map& omp, std::string& buffer, const params<Ts...>& params)
 {
+  struct result_type
+  {
+    std::array<uint32_t, sizeof...(Ts)> types;
+    std::array<const char*, sizeof...(Ts)> values;
+    std::array<int, sizeof...(Ts)> lengths;
+    std::array<int, sizeof...(Ts)> formats;
+  };
+
   return std::apply(
     [&](const auto&... args)
     {
-      buffer.reserve((0 + ... + size_of(args)));
       buffer.clear();
+      buffer.reserve((0 + ... + size_of(args)));
 
-      return std::tuple{ std::array<uint32_t, sizeof...(Ts)>{ oid_of<decltype(args)>(omp)... },
-                         std::array<const char*, sizeof...(Ts)>{ serialize(omp, buffer, args)... },
-                         std::array<int, sizeof...(Ts)>{ static_cast<int>(size_of(args))... },
-                         std::array<int, sizeof...(Ts)>{ static_cast<bool>(sizeof(args))... } };
+      return result_type{ { oid_of<decltype(args)>(omp)... },
+                          { serialize(omp, buffer, args)... },
+                          { static_cast<int>(size_of(args))... },
+                          { ((void)args, true)... } };
     },
     static_cast<const std::tuple<Ts...>&>(params));
 }
