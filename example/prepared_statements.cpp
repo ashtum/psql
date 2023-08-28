@@ -7,8 +7,11 @@
 
 namespace asio = boost::asio;
 
-asio::awaitable<void> run_exmaple(psql::connection& conn)
+asio::awaitable<void> async_main(std::string conninfo)
 {
+  auto conn = psql::connection{ co_await asio::this_coro::executor };
+  co_await conn.async_connect(conninfo, asio::deferred);
+
   // Creating a prepared statement
   co_await conn.async_prepare("add_two", "SELECT $1::INT4 + $2::INT4;", asio::deferred);
 

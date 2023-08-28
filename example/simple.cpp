@@ -7,8 +7,11 @@
 
 namespace asio = boost::asio;
 
-asio::awaitable<void> run_exmaple(psql::connection& conn)
+asio::awaitable<void> async_main(std::string conninfo)
 {
+  auto conn = psql::connection{ co_await asio::this_coro::executor };
+  co_await conn.async_connect(conninfo, asio::deferred);
+
   // Example 1
   auto [a, b] = as<std::string, int>(co_await conn.async_query("SELECT 'one'::TEXT, 2;", asio::deferred));
   std::cout << a << "-" << b << std::endl;

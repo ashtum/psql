@@ -36,8 +36,11 @@ struct user_defined<Company>
 };
 }
 
-asio::awaitable<void> run_exmaple(psql::connection& conn)
+asio::awaitable<void> async_main(std::string conninfo)
 {
+  auto conn = psql::connection{ co_await asio::this_coro::executor };
+  co_await conn.async_connect(conninfo, asio::deferred);
+
   co_await conn.async_query("DROP TYPE IF EXISTS company;", asio::deferred);
   co_await conn.async_query("DROP TYPE IF EXISTS employee;", asio::deferred);
   co_await conn.async_query("CREATE TYPE employee AS (name TEXT, phone TEXT);", asio::deferred);

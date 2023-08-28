@@ -1,8 +1,6 @@
 #pragma once
 
-#include <psql/detail/serialization.hpp>
 #include <psql/detail/type_name_of.hpp>
-#include <psql/error.hpp>
 #include <psql/notification.hpp>
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
@@ -37,7 +35,7 @@ class basic_connection
 
   std::unique_ptr<PGconn, pgconn_deleter> pgconn_;
   socket_type socket_;
-  asio::cancellation_signal notification_cs_;
+  std::unique_ptr<asio::cancellation_signal> notification_cs_ = std::make_unique<asio::cancellation_signal>();
   detail::oid_map oid_map_;
   std::vector<std::string_view> ud_types_names_;
   std::string buffer_;
@@ -50,13 +48,19 @@ public:
   {
   }
 
+  basic_connection(const basic_connection&)            = delete;
+  basic_connection& operator=(const basic_connection&) = delete;
+
+  basic_connection(basic_connection&&) noexcept            = default;
+  basic_connection& operator=(basic_connection&&) noexcept = default;
+
   template<typename OtherExecutor>
   struct rebind_executor
   {
     using other = basic_connection<OtherExecutor>;
   };
 
-  executor_type get_executor() noexcept
+  executor_type get_executor() const noexcept
   {
     return socket_.get_executor();
   }
@@ -71,9 +75,9 @@ public:
     return PQerrorMessage(pgconn_.get());
   }
 
-  void close() const noexcept
+  void close() noexcept
   {
-    pgconn_.release();
+    pgconn_.reset();
   }
 
   template<typename CompletionToken = asio::default_completion_token_t<executor_type>>
@@ -173,7 +177,7 @@ public:
           if (!PQexitPipelineMode(pgconn_.get()))
             return self.complete(error::pq_exit_pipeline_mode_failed, {});
 
-          notification_cs_.emit(asio::cancellation_type::terminal);
+          notification_cs_->emit(asio::cancellation_type::terminal);
 
           if (is_thrown)
             return self.complete(error::exception_in_pipeline_operation, {});
@@ -364,10 +368,10 @@ public:
             }
 
             if (asio::get_associated_cancellation_slot(self).is_connected())
-              asio::get_associated_cancellation_slot(self).assign([this](auto c) { notification_cs_.emit(c); });
+              asio::get_associated_cancellation_slot(self).assign([this](auto c) { notification_cs_->emit(c); });
 
             BOOST_ASIO_CORO_YIELD socket_.async_wait(
-              wait_type::wait_read, asio::bind_cancellation_slot(notification_cs_.slot(), std::move(self)));
+              wait_type::wait_read, asio::bind_cancellation_slot(notification_cs_->slot(), std::move(self)));
 
             if (!PQconsumeInput(pgconn_.get()))
               return self.complete(error::pq_consume_input_failed, {});
@@ -533,7 +537,7 @@ private:
           if (result)
             return self.complete(error::unexpected_non_null_result, {});
 
-          notification_cs_.emit(asio::cancellation_type::terminal);
+          notification_cs_->emit(asio::cancellation_type::terminal);
           auto result_ec = result_status_to_error_code(stored_result);
           return self.complete(result_ec, std::move(stored_result));
         }
