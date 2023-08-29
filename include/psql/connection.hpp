@@ -7,6 +7,7 @@
 #include <psql/sqlstate.hpp>
 
 #include <boost/asio/any_completion_handler.hpp>
+#include <boost/asio/append.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/compose.hpp>
 #include <boost/asio/coroutine.hpp>
@@ -94,10 +95,10 @@ public:
           pgconn_.reset(PQconnectStart(conninfo.data()));
 
           if (PQstatus(pgconn_.get()) == CONNECTION_BAD)
-            return self.complete(error::pq_connect_start_failed);
+            return asio::post(asio::append(std::move(self), error::pq_connect_start_failed));
 
           if (PQsetnonblocking(pgconn_.get(), 1))
-            return self.complete(error::pq_set_non_blocking_failed);
+            return asio::post(asio::append(std::move(self), error::pq_set_non_blocking_failed));
 
           PQsetNoticeProcessor(
             pgconn_.get(), +[](void*, const char*) {}, nullptr);
@@ -114,7 +115,7 @@ public:
           return socket_.async_wait(wait_type::wait_write, std::move(self));
 
         if (ret == PGRES_POLLING_FAILED)
-          return self.complete(error::connection_failed);
+          return asio::post(asio::append(std::move(self), error::connection_failed));
 
         return self.complete({});
       },
