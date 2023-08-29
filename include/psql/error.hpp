@@ -7,7 +7,7 @@ namespace psql
 enum class error
 {
   connection_failed = 1,
-  pq_status_failed,
+  pq_connect_start_failed,
   pq_set_non_blocking_failed,
   pq_flush_failed,
   pq_enter_pipeline_mode_failed,
@@ -46,8 +46,8 @@ inline const boost::system::error_category& error_category()
       {
         case error::connection_failed:
           return "Connection to database failed";
-        case error::pq_status_failed:
-          return "PQstatus failed, check the error message on the connection";
+        case error::pq_connect_start_failed:
+          return "PQconnectStart failed, check the error message on the connection";
         case error::pq_set_non_blocking_failed:
           return "PQsetnonblocking failed, check the error message on the connection";
         case error::pq_flush_failed:

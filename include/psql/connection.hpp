@@ -94,7 +94,7 @@ public:
           pgconn_.reset(PQconnectStart(conninfo.data()));
 
           if (PQstatus(pgconn_.get()) == CONNECTION_BAD)
-            return self.complete(error::pq_status_failed);
+            return self.complete(error::pq_connect_start_failed);
 
           if (PQsetnonblocking(pgconn_.get(), 1))
             return self.complete(error::pq_set_non_blocking_failed);
