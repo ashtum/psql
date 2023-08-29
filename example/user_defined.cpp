@@ -43,6 +43,7 @@ asio::awaitable<void> async_main(std::string conninfo)
 
   co_await conn.async_connect(conninfo, asio::deferred);
 
+  // Creating user-defined types within the server.
   co_await conn.async_query("DROP TYPE IF EXISTS company;", asio::deferred);
   co_await conn.async_query("DROP TYPE IF EXISTS employee;", asio::deferred);
   co_await conn.async_query("CREATE TYPE employee AS (name TEXT, phone TEXT);", asio::deferred);
@@ -50,8 +51,12 @@ asio::awaitable<void> async_main(std::string conninfo)
 
   auto company = Company{ 104, { { "Jane Eyre", "555-123-4567" }, { "Tom Hanks", "555-987-6543" } } };
 
+  // The connection will query the Oid of user-defined types through the provided name in the specialization of
+  // user_defined<>. These Oids will be stored within the connection, eliminating the need for future queries to
+  // retrieve Oid values.
   auto result = co_await conn.async_query("SELECT $1;", psql::mp(company), asio::deferred);
 
+  // Deserializes the result as a user-defined type.
   auto [id, employees] = as<Company>(result);
 
   std::cout << "company id:" << id << std::endl;

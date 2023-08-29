@@ -15,6 +15,8 @@ asio::awaitable<void> notifcation_receiver(psql::connection& conn)
 {
   for (;;)
   {
+    // `async_receive_notification` is the only asynchronous operation that can be initiated while other active
+    // asynchronous operations are ongoing on the connection.
     auto notif = co_await conn.async_receive_notifcation(asio::deferred);
 
     std::cout << "Channel:" << notif.channel() << "\tPayload:" << notif.payload() << std::endl;

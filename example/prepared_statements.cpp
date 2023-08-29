@@ -14,7 +14,7 @@ asio::awaitable<void> async_main(std::string conninfo)
 
   co_await conn.async_connect(conninfo, asio::deferred);
 
-  // Creating a prepared statement
+  // Creating a prepared statement.
   co_await conn.async_prepare("add_two", "SELECT $1::INT + $2::INT;", asio::deferred);
 
   // Example 1
@@ -22,6 +22,7 @@ asio::awaitable<void> async_main(std::string conninfo)
   std::cout << as<int>(result) << std::endl;
 
   // Example 2
+  // A pipeline of prepared queries.
   auto results = co_await conn.async_exec_pipeline(
     [](psql::pipeline& p)
     {
