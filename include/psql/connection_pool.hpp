@@ -158,6 +158,7 @@ public:
     auto lg = std::lock_guard<std::mutex>{ mtx_ };
 
     aquired_conns_--;
+    cv_.cancel_one();
 
     if (PQstatus(conn.native_handle()) != CONNECTION_OK)
       return;
@@ -166,7 +167,6 @@ public:
       return;
 
     idle_conns_.push(std::move(conn));
-    cv_.cancel_one();
   }
 };
 } // namespace detail
