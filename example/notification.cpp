@@ -26,17 +26,16 @@ asio::awaitable<void> notifcation_receiver(psql::connection& conn)
 
 asio::awaitable<void> async_main(std::string conninfo)
 {
-  auto exec  = co_await asio::this_coro::executor;
-  auto conn  = psql::connection{ exec };
-  auto timer = asio::steady_timer{ exec };
+  auto exec = co_await asio::this_coro::executor;
+  auto conn = psql::connection{ exec };
 
   co_await conn.async_connect(conninfo, asio::deferred);
-
-  auto receiver = asio::co_spawn(exec, notifcation_receiver(conn), asio::experimental::use_promise);
-
   co_await conn.async_query("LISTEN counter;", asio::deferred);
 
-  for (int i = 0; i <= 10; i++)
+  auto receiver = asio::co_spawn(exec, notifcation_receiver(conn), asio::experimental::use_promise);
+  auto timer    = asio::steady_timer{ exec };
+
+  for (auto i = 0; i <= 10; i++)
   {
     timer.expires_after(std::chrono::seconds{ 1 });
     co_await timer.async_wait(asio::deferred);

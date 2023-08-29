@@ -9,10 +9,12 @@ namespace asio = boost::asio;
 
 asio::awaitable<void> async_main(std::string conninfo)
 {
-  auto conn = psql::connection{ co_await asio::this_coro::executor };
+  auto exec = co_await asio::this_coro::executor;
+  auto conn = psql::connection{ exec };
+
   co_await conn.async_connect(conninfo, asio::deferred);
 
-  const auto results = co_await conn.async_exec_pipeline(
+  auto results = co_await conn.async_exec_pipeline(
     [](psql::pipeline& p)
     {
       p.push_query("DROP TABLE IF EXISTS phonebook;");

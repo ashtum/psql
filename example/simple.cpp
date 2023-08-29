@@ -9,7 +9,9 @@ namespace asio = boost::asio;
 
 asio::awaitable<void> async_main(std::string conninfo)
 {
-  auto conn = psql::connection{ co_await asio::this_coro::executor };
+  auto exec = co_await asio::this_coro::executor;
+  auto conn = psql::connection{ exec };
+
   co_await conn.async_connect(conninfo, asio::deferred);
 
   // Example 1
@@ -20,8 +22,9 @@ asio::awaitable<void> async_main(std::string conninfo)
   co_await conn.async_query("DROP TABLE IF EXISTS actors;", asio::deferred);
   co_await conn.async_query("CREATE TABLE actors (name TEXT, age INT);", asio::deferred);
   co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", psql::mp("Bruce Lee", 32), asio::deferred);
-  co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", psql::mp("Jackie Chan", 70), asio::deferred);
-  auto actors = co_await conn.async_query("SELECT name, age from actors", asio::deferred);
+  co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", psql::mp("Brad Pitt", 59), asio::deferred);
+
+  auto actors = co_await conn.async_query("SELECT * FROM actors", asio::deferred);
   for (const auto row : actors)
   {
     const auto [name, age] = as<std::string_view, int>(row);

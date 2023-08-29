@@ -38,7 +38,9 @@ struct user_defined<Company>
 
 asio::awaitable<void> async_main(std::string conninfo)
 {
-  auto conn = psql::connection{ co_await asio::this_coro::executor };
+  auto exec = co_await asio::this_coro::executor;
+  auto conn = psql::connection{ exec };
+
   co_await conn.async_connect(conninfo, asio::deferred);
 
   co_await conn.async_query("DROP TYPE IF EXISTS company;", asio::deferred);
@@ -46,7 +48,7 @@ asio::awaitable<void> async_main(std::string conninfo)
   co_await conn.async_query("CREATE TYPE employee AS (name TEXT, phone TEXT);", asio::deferred);
   co_await conn.async_query("CREATE TYPE company AS (id INT8, employees employee[]);", asio::deferred);
 
-  auto company = Company{ 104, { { "John Doe", "555-123-4567" }, { "Jane Smith", "555-987-6543" } } };
+  auto company = Company{ 104, { { "Jane Eyre", "555-123-4567" }, { "Tom Hanks", "555-987-6543" } } };
 
   auto result = co_await conn.async_query("SELECT $1;", psql::mp(company), asio::deferred);
 
