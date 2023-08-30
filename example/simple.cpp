@@ -15,7 +15,7 @@ asio::awaitable<void> async_main(std::string conninfo)
   co_await conn.async_connect(conninfo, asio::deferred);
 
   // Example 1
-  // We use std::string for deserializing the first field because in this scenario, the result of async_query would be a
+  // Here we use std::string for deserializing the first field because in this scenario, the result of async_query would be a
   // temporary object. If we had used std::string_view, it could point to a destroyed buffer.
   auto [a, b] = as<std::string, int>(co_await conn.async_query("SELECT 'one'::TEXT, 2;", asio::deferred));
   std::cout << a << "-" << b << std::endl;
@@ -26,7 +26,7 @@ asio::awaitable<void> async_main(std::string conninfo)
   co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", psql::mp("Bruce Lee", 32), asio::deferred);
   co_await conn.async_query("INSERT INTO actors VALUES ($1, $2);", psql::mp("Brad Pitt", 59), asio::deferred);
 
-  auto actors = co_await conn.async_query("SELECT * FROM actors", asio::deferred);
+  auto actors = co_await conn.async_query("SELECT name, age FROM actors", asio::deferred);
   for (const auto row : actors)
   {
     // Because result is preserved in the `actors` variable, we can use std::string_view for accessing TEXT fields.
