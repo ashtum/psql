@@ -61,7 +61,7 @@ public:
     using other = basic_connection<OtherExecutor>;
   };
 
-  executor_type get_executor() const noexcept
+  const executor_type& get_executor() noexcept
   {
     return socket_.get_executor();
   }
