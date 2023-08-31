@@ -15,7 +15,6 @@
 You can create a `psql::connection` by providing an executor instance; afterward, initiate an asynchronous connection operation by calling async_connect with a [connection URI](https://www.postgresql.org/docs/15/libpq-connect.html#LIBPQ-CONNSTRING) along with the desired completion token.
 
 ```C++
-auto exec = co_await asio::this_coro::executor;
 auto conn = psql::connection{ exec };
 
 co_await conn.async_connect("postgresql://localhost:5433", asio::deferred);
@@ -26,8 +25,7 @@ Related example: [simple.cpp](example/simple.cpp)
 Alternatively, you can utilize a `psql::connection_pool` to efficiently acquire and recycle connections.
 
 ```C++
-auto exec = co_await asio::this_coro::executor;
-// Create a connection_pool with a max_size of 64.
+// Create a connection pool with a max_size of 64.
 auto conn_pool = psql::connection_pool{ exec, conninfo, 64 };
 
 // Acquire a connection from the connection pool.
@@ -36,7 +34,7 @@ auto conn_pool = psql::connection_pool{ exec, conninfo, 64 };
 auto conn = co_await conn_pool.async_aquire(asio::deferred);
 
 // The destructor of pooled_connection will automatically return the connection
-// to the connection pool.
+// to the pool if the pool is still active.
 ```
 Related example: [connection_pool.cpp](example/connection_pool.cpp)
 

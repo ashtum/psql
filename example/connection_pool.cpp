@@ -23,7 +23,8 @@ asio::awaitable<void> child_task(psql::connection_pool conn_pool)
   auto active_conns = co_await conn->async_query("SELECT sum(numbackends) FROM pg_stat_database;", asio::deferred);
   std::cout << "active connections:" << as<int64_t>(active_conns) << std::endl;
 
-  // The destructor of pooled_connection will automatically return the connection to the connection pool.
+  // The destructor of pooled_connection will automatically return the connection
+  // to the pool if the pool is still active.
 }
 
 asio::awaitable<void> async_main(std::string conninfo)
