@@ -14,7 +14,7 @@ template<class T>
 struct size_of_impl;
 
 template<typename T>
-std::size_t size_of(const T& v)
+constexpr std::size_t size_of(const T& v)
 {
   return size_of_impl<std::decay_t<T>>::apply(v);
 }
@@ -23,7 +23,7 @@ template<typename T>
   requires(std::is_integral_v<T> || std::is_floating_point_v<T> || std::is_same_v<T, std::byte>)
 struct size_of_impl<T>
 {
-  static std::size_t apply(const T&)
+  static constexpr std::size_t apply(const T&)
   {
     return sizeof(T);
   }
@@ -32,7 +32,7 @@ struct size_of_impl<T>
 template<>
 struct size_of_impl<std::chrono::system_clock::time_point>
 {
-  static std::size_t apply(const std::chrono::system_clock::time_point&)
+  static constexpr std::size_t apply(const std::chrono::system_clock::time_point&)
   {
     return 8;
   }
@@ -41,7 +41,7 @@ struct size_of_impl<std::chrono::system_clock::time_point>
 template<>
 struct size_of_impl<const char*>
 {
-  static std::size_t apply(const char* value)
+  static constexpr std::size_t apply(const char* value)
   {
     return std::string_view{ value }.size();
   }
@@ -50,7 +50,7 @@ struct size_of_impl<const char*>
 template<>
 struct size_of_impl<std::string_view>
 {
-  static std::size_t apply(const std::string_view& value)
+  static constexpr std::size_t apply(const std::string_view& value)
   {
     return value.size();
   }
@@ -59,7 +59,7 @@ struct size_of_impl<std::string_view>
 template<>
 struct size_of_impl<std::string>
 {
-  static std::size_t apply(const std::string& value)
+  static constexpr std::size_t apply(const std::string& value)
   {
     return value.size();
   }
@@ -69,7 +69,7 @@ template<typename T>
   requires(is_array_v<T>)
 struct size_of_impl<T>
 {
-  static std::size_t apply(const T& vec)
+  static constexpr std::size_t apply(const T& vec)
   {
     std::size_t size = 20;
     for (const auto& value : vec)
@@ -82,20 +82,16 @@ template<typename T>
   requires(is_composite_v<T>)
 struct size_of_impl<T>
 {
-  static std::size_t apply(const T& value)
+  static constexpr std::size_t apply(const T& value)
     requires(is_user_defined_v<T>)
   {
-    std::size_t size = 4;
-    std::apply([&](auto&&... mems) { size += ((size_of(value.*mems) + 8) + ...); }, user_defined<T>::members);
-    return size;
+    return 4 + std::apply([&](auto&&... ms) { return ((size_of(value.*ms) + 8) + ...); }, user_defined<T>::members);
   }
 
-  static std::size_t apply(const T& value)
+  static constexpr std::size_t apply(const T& value)
     requires(is_tuple_v<T>)
   {
-    std::size_t size = 4;
-    std::apply([&](auto&&... mems) { size += ((size_of(mems) + 8) + ...); }, value);
-    return size;
+    return 4 + std::apply([&](auto&&... ms) { return ((size_of(ms) + 8) + ...); }, value);
   }
 };
 } // namespace detail

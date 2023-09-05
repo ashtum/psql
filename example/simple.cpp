@@ -15,8 +15,8 @@ asio::awaitable<void> async_main(std::string conninfo)
   co_await conn.async_connect(conninfo, asio::deferred);
 
   // Example 1
-  // Here we use std::string for deserializing the first field because in this scenario, the result of async_query would be a
-  // temporary object. If we had used std::string_view, it could point to a destroyed buffer.
+  // Here we use std::string for deserializing the first field because in this scenario, the result of async_query would
+  // be a temporary object. If we had used std::string_view, it could point to a destroyed buffer.
   auto [a, b] = as<std::string, int>(co_await conn.async_query("SELECT 'one'::TEXT, 2;", asio::deferred));
   std::cout << a << "-" << b << std::endl;
 

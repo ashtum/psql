@@ -102,7 +102,7 @@ struct deserialize_impl<T>
   {
     verify_member_counts(buffer, std::tuple_size_v<decltype(user_defined<T>::members)>);
     buffer = buffer.subspan(4);
-    std::apply([&](auto&&... mems) { (deserialize_member(buffer, value.*mems), ...); }, user_defined<T>::members);
+    std::apply([&](auto&&... ms) { (deserialize_member(buffer, value.*ms), ...); }, user_defined<T>::members);
   }
 
   static void apply(std::span<const char> buffer, T& value)
@@ -110,7 +110,7 @@ struct deserialize_impl<T>
   {
     verify_member_counts(buffer, std::tuple_size_v<T>);
     buffer = buffer.subspan(4);
-    std::apply([&](auto&&... mems) { (deserialize_member(buffer, mems), ...); }, value);
+    std::apply([&](auto&&... ms) { (deserialize_member(buffer, ms), ...); }, value);
   }
 };
 

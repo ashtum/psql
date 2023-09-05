@@ -115,14 +115,14 @@ struct serialize_impl<T>
     requires(is_user_defined_v<T>)
   {
     serialize<int32_t>(omp, buffer, std::tuple_size_v<decltype(user_defined<T>::members)>);
-    std::apply([&](auto&&... mems) { (serialize_member(omp, buffer, value.*mems), ...); }, user_defined<T>::members);
+    std::apply([&](auto&&... ms) { (serialize_member(omp, buffer, value.*ms), ...); }, user_defined<T>::members);
   }
 
   static void apply(const oid_map& omp, std::string& buffer, const T& value)
     requires(is_tuple_v<T>)
   {
     serialize<int32_t>(omp, buffer, std::tuple_size_v<T>);
-    std::apply([&](auto&&... mems) { (serialize_member(omp, buffer, mems), ...); }, value);
+    std::apply([&](auto&&... ms) { (serialize_member(omp, buffer, ms), ...); }, value);
   }
 };
 
