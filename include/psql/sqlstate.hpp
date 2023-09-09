@@ -825,9 +825,9 @@ inline const boost::system::error_category& sqlstate_category()
     }
   };
 
-  static const auto category_ = category{};
+  static const auto cat = category{};
 
-  return category_;
+  return cat;
 };
 
 inline boost::system::error_code make_error_code(sqlstate e)

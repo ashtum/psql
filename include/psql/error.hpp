@@ -92,9 +92,9 @@ inline const boost::system::error_category& error_category()
     }
   };
 
-  static const auto category_ = category{};
+  static const auto cat = category{};
 
-  return category_;
+  return cat;
 };
 
 inline boost::system::error_code make_error_code(error e)
