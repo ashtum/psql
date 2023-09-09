@@ -192,6 +192,12 @@ public:
   {
   }
 
+  template<typename ExecutionContext>
+  basic_connection_pool(ExecutionContext& context, std::string conninfo, size_t max_size = 32)
+    : impl_{ std::make_shared<impl_type>(context.get_executor(), std::move(conninfo), max_size) }
+  {
+  }
+
   template<typename OtherExecutor>
   struct rebind_executor
   {

@@ -49,6 +49,13 @@ public:
   {
   }
 
+  template<typename ExecutionContext>
+    requires std::is_convertible_v<ExecutionContext&, asio::execution_context&>
+  explicit basic_connection(ExecutionContext& context)
+    : socket_{ context.get_executor() }
+  {
+  }
+
   basic_connection(const basic_connection&)            = delete;
   basic_connection& operator=(const basic_connection&) = delete;
 
