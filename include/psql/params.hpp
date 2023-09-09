@@ -11,7 +11,7 @@ struct params : std::tuple<Ts...>
 };
 
 template<typename... Ts>
-auto mp(Ts&&... ts)
+constexpr auto mp(Ts&&... ts)
 {
   return params<std::decay_t<Ts>...>{ std::forward<Ts>(ts)... };
 }
