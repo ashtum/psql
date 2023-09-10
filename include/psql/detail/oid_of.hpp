@@ -32,19 +32,19 @@ struct oid_of_impl<T>
   static constexpr uint32_t apply(const oid_map&)
     requires(!is_user_defined_v<value_type>)
   {
-    return builtin<value_type>::array_oid;
+    return builtin<value_type>::oids.array;
   }
 
   static constexpr uint32_t apply()
     requires(!is_user_defined_v<value_type>)
   {
-    return builtin<value_type>::array_oid;
+    return builtin<value_type>::oids.array;
   }
 
   static constexpr uint32_t apply(const oid_map& omp)
     requires(is_user_defined_v<value_type>)
   {
-    return omp.at(user_defined<value_type>::name).array;
+    return omp.at(typeid(value_type)).array;
   }
 
   static constexpr uint32_t apply()
@@ -61,19 +61,19 @@ struct oid_of_impl<T>
   static constexpr uint32_t apply(const oid_map&)
     requires(!is_user_defined_v<T>)
   {
-    return builtin<T>::type_oid;
+    return builtin<T>::oids.single;
   }
 
   static constexpr uint32_t apply()
     requires(!is_user_defined_v<T>)
   {
-    return builtin<T>::type_oid;
+    return builtin<T>::oids.single;
   }
 
   static constexpr uint32_t apply(const oid_map& omp)
     requires(is_user_defined_v<T>)
   {
-    return omp.at(user_defined<T>::name).type;
+    return omp.at(typeid(T)).single;
   }
 
   static constexpr uint32_t apply()

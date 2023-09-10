@@ -1,5 +1,7 @@
 #pragma once
 
+#include <psql/detail/oid_pair.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -15,99 +17,85 @@ struct builtin;
 template<>
 struct builtin<uint32_t>
 {
-  static constexpr auto type_oid  = 26;
-  static constexpr auto array_oid = 1028;
+  static constexpr oid_pair oids{ 26, 1028 };
 };
 
 template<>
 struct builtin<bool>
 {
-  static constexpr auto type_oid  = 16;
-  static constexpr auto array_oid = 1000;
+  static constexpr oid_pair oids{ 16, 1000 };
 };
 
 template<>
 struct builtin<std::byte>
 {
-  static constexpr auto type_oid  = 17;
-  static constexpr auto array_oid = 1001;
+  static constexpr oid_pair oids{ 17, 1001 };
 };
 
 template<>
 struct builtin<char>
 {
-  static constexpr auto type_oid  = 18;
-  static constexpr auto array_oid = 1002;
+  static constexpr oid_pair oids{ 18, 1002 };
 };
 
 template<>
 struct builtin<int64_t>
 {
-  static constexpr auto type_oid  = 20;
-  static constexpr auto array_oid = 1016;
+  static constexpr oid_pair oids{ 20, 1016 };
 };
 
 template<>
 struct builtin<int16_t>
 {
-  static constexpr auto type_oid  = 21;
-  static constexpr auto array_oid = 1005;
+  static constexpr oid_pair oids{ 21, 1005 };
 };
 
 template<>
 struct builtin<int32_t>
 {
-  static constexpr auto type_oid  = 23;
-  static constexpr auto array_oid = 1007;
+  static constexpr oid_pair oids{ 23, 1007 };
 };
 
 template<>
 struct builtin<float>
 {
-  static constexpr auto type_oid  = 700;
-  static constexpr auto array_oid = 1021;
+  static constexpr oid_pair oids{ 700, 1021 };
 };
 
 template<>
 struct builtin<double>
 {
-  static constexpr auto type_oid  = 701;
-  static constexpr auto array_oid = 1022;
+  static constexpr oid_pair oids{ 701, 1022 };
 };
 
 template<>
 struct builtin<std::chrono::system_clock::time_point>
 {
-  static constexpr auto type_oid  = 1114;
-  static constexpr auto array_oid = 1115;
+  static constexpr oid_pair oids{ 1114, 1115 };
 };
 
 template<>
 struct builtin<std::string_view>
 {
-  static constexpr auto type_oid  = 25;
-  static constexpr auto array_oid = 1009;
+  static constexpr oid_pair oids{ 25, 1009 };
 };
 
 template<>
 struct builtin<std::string>
 {
-  static constexpr auto type_oid  = 25;
-  static constexpr auto array_oid = 1009;
+  static constexpr oid_pair oids{ 25, 1009 };
 };
 
 template<>
 struct builtin<const char*>
 {
-  static constexpr auto type_oid  = 25;
-  static constexpr auto array_oid = 1009;
+  static constexpr oid_pair oids{ 25, 1009 };
 };
 
 template<typename... Ts>
 struct builtin<std::tuple<Ts...>>
 {
-  static constexpr auto type_oid  = 2249;
-  static constexpr auto array_oid = 2287;
+  static constexpr oid_pair oids{ 2249, 2287 };
 };
 } // namespace detail
 } // namespace psql

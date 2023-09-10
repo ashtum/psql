@@ -1,14 +1,16 @@
 #pragma once
 
-#include <psql/detail/oid_pair.hpp>
-
-#include <map>
 #include <typeindex>
+#include <string_view>
 
 namespace psql
 {
 namespace detail
 {
-using oid_map = std::map<std::type_index, oid_pair>;
+struct udt_pair
+{
+  std::string_view name;
+  std::type_index type_index;
+};
 } // namespace detail
 } // namespace psql

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <psql/detail/type_name_of.hpp>
+#include <psql/detail/extract_new_udts.hpp>
 #include <psql/notification.hpp>
 #include <psql/pipeline.hpp>
 #include <psql/result.hpp>
@@ -38,7 +38,7 @@ class basic_connection
   socket_type socket_;
   std::unique_ptr<asio::cancellation_signal> notification_cs_ = std::make_unique<asio::cancellation_signal>();
   detail::oid_map oid_map_;
-  std::vector<std::string_view> udt_names_;
+  std::vector<detail::udt_pair> new_udts_;
   std::string buffer_;
 
 public:
@@ -218,9 +218,9 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          detail::extract_user_defined_types_names<Ts...>(udt_names_, oid_map_);
+          (detail::extract_new_udts<Ts>(new_udts_, oid_map_), ...);
 
-          if (!udt_names_.empty())
+          if (!new_udts_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
@@ -276,9 +276,9 @@ public:
       {
         BOOST_ASIO_CORO_REENTER(coro)
         {
-          detail::extract_user_defined_types_names<Ts...>(udt_names_, oid_map_);
+          (detail::extract_new_udts<Ts>(new_udts_, oid_map_), ...);
 
-          if (!udt_names_.empty())
+          if (!new_udts_.empty())
           {
             BOOST_ASIO_CORO_YIELD async_query_oids(std::move(self));
             if (ec)
@@ -468,12 +468,16 @@ private:
         BOOST_ASIO_CORO_REENTER(coro)
         {
           {
-            auto [t, v, l, f] = detail::serialize(oid_map_, buffer_, mp(udt_names_));
+            std::vector<std::string_view> new_udt_names;
+            new_udt_names.reserve(new_udts_.size());
+            for (const auto& [name, _] : new_udts_)
+              new_udt_names.push_back(name);
+
+            auto [t, v, l, f] = detail::serialize(oid_map_, buffer_, mp(new_udt_names));
 
             if (!PQsendQueryParams(
                   pgconn_.get(),
                   "SELECT"
-                  "  type_name,"
                   "  COALESCE(to_regtype(type_name)::oid, - 1),"
                   "  COALESCE(to_regtype(type_name || '[]')::oid, - 1)"
                   "FROM"
@@ -492,14 +496,14 @@ private:
           if (auto ec = result_status_to_error_code(result))
             return self.complete(ec);
 
-          for (auto row : result)
+          for (size_t i = 0; i < result.size(); i++)
           {
-            auto [type_name, type_oid, array_oid] = as<std::string_view, uint32_t, uint32_t>(row);
+            auto [type_oid, array_oid] = as<uint32_t, uint32_t>(result.at(i));
 
             if (type_oid == 0xFFFFFFFF || array_oid == 0xFFFFFFFF)
               return self.complete(error::user_defined_type_does_not_exist);
 
-            oid_map_.emplace(type_name, detail::oid_pair{ type_oid, array_oid });
+            oid_map_.emplace(new_udts_.at(i).type_index, detail::oid_pair{ type_oid, array_oid });
           }
 
           return self.complete({});
